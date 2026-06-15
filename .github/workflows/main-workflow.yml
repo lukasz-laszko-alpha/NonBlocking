@@ -2,6 +2,10 @@ name: main-workflow
 
 # Builds, tests and packs the Alc.NonBlocking library, then publishes the
 # resulting NuGet package to Alphalab's GitHub Packages feed.
+#
+# Runs on the hybrid cluster regular-sized runner profile (actions-runners-hybrid:
+# 4 CPU / 16 GB) inside the alc-build-tools build image, following the alc-nexus
+# conventions (ECR login via OIDC, container credentials from the login outputs).
 on:
   push:
     branches:
@@ -9,6 +13,7 @@ on:
   workflow_dispatch: # for manual execution
 
 permissions:
+  id-token: write
   contents: read
   packages: write
 
@@ -16,12 +21,15 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: 1
+  # Roll net8.0 test target forward onto the net10 runtime shipped in the image.
+  DOTNET_ROLL_FORWARD: LatestMajor
   # Alphalab's NuGet (GitHub Packages, org: alphalab-hq)
   NUGET_FEED: https://nuget.pkg.github.com/alphalab-hq/index.json
 
 jobs:
   init:
-    runs-on: ubuntu-latest
+    runs-on: actions-runners-hybrid
     outputs:
       version: ${{ steps.setup.outputs.version }}
     steps:
@@ -33,21 +41,40 @@ jobs:
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "version=1.${DATE}.${{ github.run_number }}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
+  ecr-login:
+    runs-on: actions-runners-hybrid
+    outputs:
+      docker_username: ${{ steps.login-ecr.outputs.docker_username_346086605621_dkr_ecr_ap_southeast_1_amazonaws_com }}
+      docker_password: ${{ steps.login-ecr.outputs.docker_password_346086605621_dkr_ecr_ap_southeast_1_amazonaws_com }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::346086605621:role/github-oidc-deployer
+          aws-region: ap-southeast-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registries: "346086605621"
+          mask-password: "false"
+
   publish:
-    needs: init
-    runs-on: ubuntu-latest
+    needs: [init, ecr-login]
+    runs-on: actions-runners-hybrid
+    timeout-minutes: 20
     env:
       VERSION: ${{ needs.init.outputs.version }}
+    container:
+      image: "346086605621.dkr.ecr.ap-southeast-1.amazonaws.com/alc-build-tools:dotnet10.0-debian12-292b68e"
+      credentials:
+        username: ${{ needs.ecr-login.outputs.docker_username }}
+        password: ${{ needs.ecr-login.outputs.docker_password }}
+      options: --user 1001:1001
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: |
-            8.0.x
-            10.0.x
 
       - name: Restore
         run: dotnet restore NonBlocking.sln
@@ -63,7 +90,7 @@ jobs:
           dotnet pack src/NonBlocking/NonBlocking.csproj
           -c Release --no-build
           -p:PackageVersion=$VERSION
-          -o "${{ github.workspace }}/artifacts"
+          -o "$GITHUB_WORKSPACE/artifacts"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -73,7 +100,7 @@ jobs:
 
       - name: Push to Alphalab NuGet
         run: >
-          dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg"
+          dotnet nuget push "$GITHUB_WORKSPACE/artifacts/*.nupkg"
           --source "$NUGET_FEED"
           --api-key "${{ secrets.GITHUB_TOKEN }}"
           --skip-duplicate
