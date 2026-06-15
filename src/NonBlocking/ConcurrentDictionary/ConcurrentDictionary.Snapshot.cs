@@ -9,6 +9,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using JetBrains.Annotations;
 
 namespace Alc.NonBlocking
 {
@@ -32,6 +33,7 @@ namespace Alc.NonBlocking
         /// Allocation: an empty dictionary allocates nothing; otherwise the only heap traffic is renting/returning
         /// the pooled buffer, so repeated captures of a similar size reuse buffers and allocate nothing.
         /// </remarks>
+        [MustDisposeResource]
         public Snapshot TakeSnapshot()
         {
             // linearization point: resolve a quiescent table, then copy once.

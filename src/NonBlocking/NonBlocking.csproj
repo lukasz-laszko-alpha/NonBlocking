@@ -60,6 +60,11 @@
     <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
   </PropertyGroup>
 
+  <!-- Compile-time-only ReSharper/Rider annotations (e.g. [MustDisposeResource]); not a runtime or transitive dependency. -->
+  <ItemGroup>
+    <PackageReference Include="JetBrains.Annotations" Version="2025.2.4" PrivateAssets="all" />
+  </ItemGroup>
+
   <!-- System.Runtime.CompilerServices.Unsafe is in-box on modern .NET; only the netstandard legs need the package. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' or '$(TargetFramework)' == 'netstandard2.1'">
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="4.3.0" />
