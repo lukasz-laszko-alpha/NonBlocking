@@ -10,7 +10,9 @@ namespace NonBlockingTests
 {
     // Run with: dotnet run -c Release -- bdn --filter *EnumerationBenchmarks*
     // [MemoryDiagnoser] reports allocated bytes/op; the NonBlocking rows are expected to be 0 B.
-    [MemoryDiagnoser]
+    [MemoryDiagnoser]                       // adds the "Allocated" column (bytes/op)
+    [MarkdownExporterAttribute.GitHub]      // emits *-report-github.md for the CI job summary
+    [JsonExporterAttribute.FullCompressed]  // emits *-report-full-compressed.json for regression tracking
     public class EnumerationBenchmarks
     {
         [Params(100, 10000)]

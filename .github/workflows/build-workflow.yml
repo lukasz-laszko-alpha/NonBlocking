@@ -31,8 +31,9 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write        # github-action-benchmark commit comments on regressions
   packages: write
+  pull-requests: write   # github-action-benchmark PR comments on regressions
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
@@ -119,3 +120,79 @@ jobs:
             echo "|---------|---------|-----------|------|"
             echo "| Alc.NonBlocking | \`$VERSION\` | ${{ inputs.publish }} | $NUGET_FEED |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Performance evaluation: runs BenchmarkDotNet, shows time + allocations, and
+  # compares against rolling history (kept in the Actions cache) to flag regressions.
+  benchmark:
+    needs: ecr-login
+    runs-on: actions-runners-hybrid
+    timeout-minutes: 30
+    env:
+      HOME: /home/bob
+      # Path BenchmarkDotNet writes its results to (Namespace.Class-report-*).
+      BDN_GITHUB_MD: BenchmarkDotNet.Artifacts/results/NonBlockingTests.EnumerationBenchmarks-report-github.md
+      BDN_JSON: BenchmarkDotNet.Artifacts/results/NonBlockingTests.EnumerationBenchmarks-report-full-compressed.json
+    container:
+      image: "${{ inputs.ecr-registry }}/${{ inputs.build-image }}"
+      credentials:
+        username: ${{ needs.ecr-login.outputs.docker_username }}
+        password: ${{ needs.ecr-login.outputs.docker_password }}
+      options: --user 1001:1001
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run benchmarks
+        # --job short keeps CI time bounded; allocations stay exact, timings are approximate.
+        run: dotnet run -c Release --project BenchmarksCore/BenchmarksCore.csproj -- bdn --filter '*EnumerationBenchmarks*' --job short
+
+      - name: Add benchmark results to job summary
+        if: success() || failure()
+        run: |
+          {
+            echo "## Benchmark results (Alc.NonBlocking)"
+            echo ""
+            cat "$BDN_GITHUB_MD"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark artifacts
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: BenchmarkDotNet.Artifacts/**
+
+      # Restore the rolling baseline. On a PR this picks up the latest baseline
+      # saved on main (caches created on the base branch are visible to PRs).
+      - name: Restore benchmark history
+        uses: actions/cache/restore@v4
+        with:
+          path: ./benchmark-cache
+          key: benchmark-history-${{ github.run_id }}
+          restore-keys: |
+            benchmark-history-
+
+      - name: Compare against history and flag regressions
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Alc.NonBlocking benchmarks
+          tool: benchmarkdotnet
+          output-file-path: ${{ env.BDN_JSON }}
+          external-data-json-path: ./benchmark-cache/benchmark-data.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          summary-always: true
+          comment-on-alert: true
+          alert-threshold: '150%'
+          # Timings on the shared runner are noisy, so do not break the build;
+          # regressions surface as a PR comment and in the job summary.
+          fail-on-alert: false
+          # Only main updates the stored baseline; PRs compare without writing.
+          save-data-file: ${{ inputs.publish }}
+
+      # Persist the updated baseline only on main.
+      - name: Save benchmark history
+        if: ${{ inputs.publish }}
+        uses: actions/cache/save@v4
+        with:
+          path: ./benchmark-cache
+          key: benchmark-history-${{ github.run_id }}
