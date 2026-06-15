@@ -67,7 +67,7 @@ jobs:
 
   build:
     needs: ecr-login
-    runs-on: actions-runners-hybrid
+    runs-on: actions-runners-hybrid-large
     timeout-minutes: 20
     env:
       VERSION: ${{ inputs.version }}
@@ -125,7 +125,7 @@ jobs:
   # compares against rolling history (kept in the Actions cache) to flag regressions.
   benchmark:
     needs: ecr-login
-    runs-on: actions-runners-hybrid
+    runs-on: actions-runners-hybrid-large
     timeout-minutes: 30
     env:
       HOME: /home/bob
