@@ -4,7 +4,7 @@
 
 using System.Threading;
 
-namespace NonBlocking
+namespace Alc.NonBlocking
 {
     internal sealed class DictionaryImplLong<TValue>
                 : DictionaryImpl<long, long, TValue>

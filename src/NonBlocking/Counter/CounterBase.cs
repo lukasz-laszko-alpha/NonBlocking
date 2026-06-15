@@ -5,7 +5,7 @@
 using System;
 using System.Runtime.CompilerServices;
 
-namespace NonBlocking
+namespace Alc.NonBlocking
 {
     /// <summary>
     /// Scalable counter base.

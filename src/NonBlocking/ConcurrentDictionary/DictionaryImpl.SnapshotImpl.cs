@@ -6,7 +6,7 @@
 
 using System.Runtime.CompilerServices;
 
-namespace NonBlocking
+namespace Alc.NonBlocking
 {
     internal abstract partial class DictionaryImpl<TKey, TKeyStore, TValue>
         : DictionaryImpl<TKey, TValue>
@@ -16,56 +16,72 @@ namespace NonBlocking
             return new SnapshotImpl(this);
         }
 
+        // linearization point.
+        // if the table is quiescent and has no copy in progress, we can simply iterate over it.
+        // Otherwise we finish any in-progress copy and retry, then return the resulting table.
+        internal override DictionaryImpl<TKey, TValue> GetTableForSnapshot()
+        {
+            var table = this;
+            while (table._newTable != null)
+            {
+                // there is a copy in progress, finish it and try again
+                table.HelpCopy(copy_all: true);
+                table = (DictionaryImpl<TKey, TKeyStore, TValue>)table._topDict._table;
+            }
+
+            return table;
+        }
+
+        // Single shared traversal. 'this' is the resolved table from GetTableForSnapshot.
+        // The per-element work (keyFromEntry, the TryGetValue re-lookup that keeps the view
+        // linearizable, FromObjectValue) is identical to the original SnapshotImpl.MoveNext.
+        internal override bool MoveNextSnapshot(ref int idx, out TKey key, out TValue value)
+        {
+            var entries = this._entries;
+            while (idx < entries.Length)
+            {
+                var nextEntry = entries[idx++];
+
+                if (nextEntry.value != null)
+                {
+                    var nextKstore = nextEntry.key;
+                    if (nextKstore == null)
+                    {
+                        // slot was deleted.
+                        continue;
+                    }
+
+                    var curKey = keyFromEntry(nextKstore);
+                    object nextV = TryGetValue(curKey);
+                    if (nextV != null)
+                    {
+                        key = curKey;
+                        value = FromObjectValue(nextV);
+                        return true;
+                    }
+                }
+            }
+
+            key = default;
+            value = default;
+            return false;
+        }
+
         private class SnapshotImpl : Snapshot
         {
-            private readonly DictionaryImpl<TKey, TKeyStore, TValue> _table;
+            private readonly DictionaryImpl<TKey, TValue> _table;
 
             public SnapshotImpl(DictionaryImpl<TKey, TKeyStore, TValue> dict)
             {
-                this._table = dict;
-
                 // linearization point.
-                // if table is quiescent and has no copy in progress,
-                // we can simply iterate over its table.
-                while (_table._newTable != null)
-                {
-                    // there is a copy in progress, finish it and try again
-                    _table.HelpCopy(copy_all: true);
-                    this._table = (DictionaryImpl<TKey, TKeyStore, TValue>)this._table._topDict._table;
-                }
+                this._table = dict.GetTableForSnapshot();
             }
 
             public override int Count => _table.Count;
 
             public override bool MoveNext()
             {
-                var entries = this._table._entries;
-                while (_idx < entries.Length)
-                {
-                    var nextEntry = entries[_idx++];
-
-                    if (nextEntry.value != null)
-                    {
-                        var nextKstore = nextEntry.key;
-                        if (nextKstore == null)
-                        {
-                            // slot was deleted.
-                            continue;
-                        }
-
-                        _curKey = _table.keyFromEntry(nextKstore);
-                        object nextV = _table.TryGetValue(_curKey);
-                        if (nextV != null)
-                        {
-                            _curValue = _table.FromObjectValue(nextV);
-                            return true;
-                        }
-                    }
-                }
-
-                _curKey = default;
-                _curValue = default;
-                return false;
+                return _table.MoveNextSnapshot(ref _idx, out _curKey, out _curValue);
             }
 
             public override void Reset()

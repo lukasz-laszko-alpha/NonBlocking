@@ -19,7 +19,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace NonBlocking
+namespace Alc.NonBlocking
 {
     internal abstract partial class DictionaryImpl<TKey, TKeyStore, TValue>
         : DictionaryImpl<TKey, TValue>
@@ -98,7 +98,7 @@ namespace NonBlocking
             this._size = new Counter32();
             this._topDict = topDict;
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NET
             if (RuntimeHelpers.IsReferenceOrContainsReferences<TKey>())
 #else
             if (!typeof(TKeyStore).IsValueType)

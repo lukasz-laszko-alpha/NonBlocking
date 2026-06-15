@@ -12,9 +12,10 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using static NonBlocking.DictionaryImpl;
+using System.Threading;
+using static Alc.NonBlocking.DictionaryImpl;
 
-namespace NonBlocking
+namespace Alc.NonBlocking
 {
     /// <summary>
     /// Represents a thread-safe and lock-free collection of keys and values.
@@ -27,7 +28,7 @@ namespace NonBlocking
     /// </remarks>
     [DebuggerTypeProxy(typeof(IDictionaryDebugView<,>))]
     [DebuggerDisplay("Count = {Count}")]
-    public class ConcurrentDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary, IReadOnlyDictionary<TKey, TValue> where TKey : notnull
+    public partial class ConcurrentDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary, IReadOnlyDictionary<TKey, TValue> where TKey : notnull
     {
 #if NETSTANDARD2_0
         private readonly bool _valueIsValueType = typeof(TValue).IsValueType;
@@ -276,7 +277,7 @@ namespace NonBlocking
         /// </param>
         /// <returns>true if an object was removed successfully; otherwise, false.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="key"/> is a null reference (Nothing in Visual Basic).</exception>
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NET
         public bool TryRemove(TKey key, [MaybeNullWhen(false)] out TValue value)
 #else
         public bool TryRemove(TKey key, out TValue value)
@@ -357,7 +358,7 @@ namespace NonBlocking
         /// </param>
         /// <returns>true if the key was found in the <see cref="ConcurrentDictionary{TKey,TValue}"/>; otherwise, false.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="key"/> is a null reference (Nothing in Visual Basic).</exception>
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NET
         public bool TryGetValue(TKey key, [MaybeNullWhen(false)] out TValue value)
 #else
         public bool TryGetValue(TKey key, out TValue value)
@@ -572,10 +573,18 @@ namespace NonBlocking
         /// of the dictionary.  The contents exposed through the enumerator may contain modifications
         /// made to the dictionary after <see cref="GetEnumerator"/> was called.
         /// </remarks>
-        public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator()
+        public Enumerator GetEnumerator()
         {
-            return new SnapshotEnumerator(_table.GetSnapshot());
+            return new Enumerator(_table.GetTableForSnapshot());
         }
+
+        /// <summary>Returns an enumerator that iterates through the <see
+        /// cref="ConcurrentDictionary{TKey,TValue}"/>.</summary>
+        /// <remarks>
+        /// This is the interface implementation; it boxes the struct enumerator (one allocation).
+        /// Prefer the public <see cref="GetEnumerator"/> for allocation-free iteration.
+        /// </remarks>
+        IEnumerator<KeyValuePair<TKey, TValue>> IEnumerable<KeyValuePair<TKey, TValue>>.GetEnumerator() => GetEnumerator();
 
         /// <summary>Gets or sets the value associated with the specified key.</summary>
         /// <param name="key">The key of the value to get or set.</param>
@@ -619,7 +628,7 @@ namespace NonBlocking
 
         /// <summary>Throws a KeyNotFoundException.</summary>
         /// <remarks>Separate from ThrowHelper to avoid boxing at call site while reusing this generic instantiation.</remarks>
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NET
         [DoesNotReturn]
 #endif
         private static TValue ThrowKeyNotFoundException() =>
@@ -982,7 +991,9 @@ namespace NonBlocking
         /// </summary>
         /// <value>An <see cref="ICollection{TKey}"/> containing the keys in the
         /// <see cref="Dictionary{TKey,TValue}"/>.</value>
-        public ICollection<TKey> Keys => GetKeys();
+        public KeyCollection Keys => _keys ?? Interlocked.CompareExchange(ref _keys, new KeyCollection(this), null) ?? _keys;
+
+        ICollection<TKey> IDictionary<TKey, TValue>.Keys => Keys;
 
         /// <summary>
         /// Gets an <see cref="IEnumerable{TKey}"/> containing the keys of
@@ -990,7 +1001,7 @@ namespace NonBlocking
         /// </summary>
         /// <value>An <see cref="IEnumerable{TKey}"/> containing the keys of
         /// the <see cref="IReadOnlyDictionary{TKey,TValue}"/>.</value>
-        IEnumerable<TKey> IReadOnlyDictionary<TKey, TValue>.Keys => GetKeys();
+        IEnumerable<TKey> IReadOnlyDictionary<TKey, TValue>.Keys => Keys;
 
         /// <summary>
         /// Gets a collection containing the values in the <see
@@ -999,7 +1010,9 @@ namespace NonBlocking
         /// <value>An <see cref="ICollection{TValue}"/> containing the values in
         /// the
         /// <see cref="Dictionary{TKey,TValue}"/>.</value>
-        public ICollection<TValue> Values => GetValues();
+        public ValueCollection Values => _values ?? Interlocked.CompareExchange(ref _values, new ValueCollection(this), null) ?? _values;
+
+        ICollection<TValue> IDictionary<TKey, TValue>.Values => Values;
 
         /// <summary>
         /// Gets an <see cref="IEnumerable{TValue}"/> containing the values
@@ -1007,7 +1020,7 @@ namespace NonBlocking
         /// </summary>
         /// <value>An <see cref="IEnumerable{TValue}"/> containing the
         /// values in the <see cref="IReadOnlyDictionary{TKey,TValue}"/>.</value>
-        IEnumerable<TValue> IReadOnlyDictionary<TKey, TValue>.Values => GetValues();
+        IEnumerable<TValue> IReadOnlyDictionary<TKey, TValue>.Values => Values;
         #endregion
 
         #region ICollection<KeyValuePair<TKey,TValue>> Members
@@ -1172,7 +1185,7 @@ namespace NonBlocking
         /// </summary>
         /// <value>An <see cref="ICollection"/> containing the keys of the <see
         /// cref="IDictionary"/>.</value>
-        ICollection IDictionary.Keys => GetKeys();
+        ICollection IDictionary.Keys => Keys;
 
         /// <summary>
         /// Removes the element with the specified key from the <see
@@ -1200,7 +1213,7 @@ namespace NonBlocking
         /// </summary>
         /// <value>An <see cref="ICollection"/> containing the values in the <see
         /// cref="IDictionary"/>.</value>
-        ICollection IDictionary.Values => GetValues();
+        ICollection IDictionary.Values => Values;
 
         /// <summary>
         /// Gets or sets the value associated with the specified key.
@@ -1347,46 +1360,48 @@ namespace NonBlocking
 
 
         /// <summary>
-        /// Gets a collection containing the keys in the dictionary.
+        /// An allocation-free enumerator over the <see cref="ConcurrentDictionary{TKey,TValue}"/>.
         /// </summary>
-        private ReadOnlyCollection<TKey> GetKeys()
+        /// <remarks>
+        /// This is a mutable value type. <c>foreach</c> over the dictionary uses it without any heap
+        /// allocation. Like <see cref="Dictionary{TKey,TValue}.Enumerator"/>, it must not be copied while
+        /// in use. The view is live (not a moment-in-time snapshot), matching the documented behavior of
+        /// <see cref="GetEnumerator"/>.
+        /// </remarks>
+        public struct Enumerator : IEnumerator<KeyValuePair<TKey, TValue>>
         {
-            var keys = new List<TKey>(Count);
-            foreach (var kv in this)
+            // The resolved, quiescent inner table. Typed as the generic-2 base so the struct never
+            // needs to name the internal key-store type.
+            private readonly DictionaryImpl<TKey, TValue> _table;
+            private int _idx;
+            private TKey _curKey;
+            private TValue _curValue;
+
+            internal Enumerator(DictionaryImpl<TKey, TValue> table)
             {
-                keys.Add(kv.Key);
+                _table = table;
+                _idx = 0;
+                _curKey = default;
+                _curValue = default;
             }
 
-            return new ReadOnlyCollection<TKey>(keys);
-        }
+            /// <summary>Gets the element at the current position of the enumerator.</summary>
+            public KeyValuePair<TKey, TValue> Current => new KeyValuePair<TKey, TValue>(_curKey, _curValue);
 
-        /// <summary>
-        /// Gets a collection containing the values in the dictionary.
-        /// </summary>
-        private ReadOnlyCollection<TValue> GetValues()
-        {
-            var values = new List<TValue>(Count);
-            foreach (var kv in this)
+            object IEnumerator.Current => new KeyValuePair<TKey, TValue>(_curKey, _curValue);
+
+            /// <summary>Advances the enumerator to the next element.</summary>
+            public bool MoveNext() => _table.MoveNextSnapshot(ref _idx, out _curKey, out _curValue);
+
+            /// <summary>Sets the enumerator to its initial position.</summary>
+            public void Reset()
             {
-                values.Add(kv.Value);
+                _idx = 0;
+                _curKey = default;
+                _curValue = default;
             }
 
-            return new ReadOnlyCollection<TValue>(values);
-        }
-
-        internal class SnapshotEnumerator : IEnumerator<KeyValuePair<TKey, TValue>>
-        {
-            private DictionaryImpl<TKey, TValue>.Snapshot _snapshot;
-            public SnapshotEnumerator(DictionaryImpl<TKey, TValue>.Snapshot snapshot)
-            {
-                _snapshot = snapshot;
-            }
-
-            public KeyValuePair<TKey, TValue> Current => _snapshot.Current;
-            object IEnumerator.Current => _snapshot.Current;
-
-            public bool MoveNext() => _snapshot.MoveNext();
-            public void Reset() => _snapshot.Reset();
+            /// <summary>Releases resources used by the enumerator.</summary>
             public void Dispose() { }
         }
 
@@ -1438,27 +1453,27 @@ namespace NonBlocking
 
     internal static class ThrowHelper
     {
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NET
         [DoesNotReturn]
 #endif
         internal static void ThrowKeyNullException() => ThrowArgumentNullException("key");
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NET
         [DoesNotReturn]
 #endif
         internal static void ThrowArgumentNullException(string name) => throw new ArgumentNullException(name);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NET
         [DoesNotReturn]
 #endif
         internal static void ThrowArgumentNullException(string name, string message) => throw new ArgumentNullException(name, message);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NET
         [DoesNotReturn]
 #endif
         internal static void ThrowValueNullException() => throw new ArgumentException("value is null");
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NET
         [DoesNotReturn]
 #endif
         internal static void ThrowOutOfMemoryException() => throw new OutOfMemoryException();

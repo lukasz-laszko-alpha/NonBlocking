@@ -123,7 +123,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void NullValueRef()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<int, string>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<int, string>();
 
             string s;
             Assert.False(dict.TryGetValue(0, out s));
@@ -155,7 +155,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void NullValueNub()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<int, int?>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<int, int?>();
 
             int? s;
             if (dict.TryGetValue(0, out s))
@@ -183,7 +183,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void AddSetRemove()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<object, string>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<object, string>();
 
             for (int i = 0; i < 10; i++)
             {
@@ -237,7 +237,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void AddSetRemoveConcurrent()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<object, string>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<object, string>();
 
             foreach (var iterations in ConcurrentIterations)
             {
@@ -267,7 +267,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void AddSetRemoveConcurrentNullIntolerant()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<object, int>(new NullIntolerantComparer());
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<object, int>(new NullIntolerantComparer());
 
             var keys = new object[ConcurrentIterations[^1]];
             for (int i = 0; i < keys.Length; i++) keys[i] = i;
@@ -284,7 +284,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void AddSetRemoveConcurrentInt()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<int, string>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<int, string>();
 
             foreach (var iterations in ConcurrentIterations)
             {
@@ -298,7 +298,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void AddSetRemoveConcurrentIntInt()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<int, int>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<int, int>();
 
             foreach (var iterations in ConcurrentIterations)
             {
@@ -313,7 +313,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void AddSetRemoveConcurrentUIntInt()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<uint, int>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<uint, int>();
 
             foreach (var iterations in ConcurrentIterations)
             {
@@ -328,7 +328,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void AddSetRemoveConcurrentLongInt()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<long, long>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<long, long>();
 
             foreach (var iterations in ConcurrentIterations)
             {
@@ -347,7 +347,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void AddSetRemoveConcurrentULongInt()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<ulong, long>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<ulong, long>();
 
             foreach (var iterations in ConcurrentIterations)
             {
@@ -368,7 +368,7 @@ namespace NonBlockingTests
         {
             if (IntPtr.Size == 8)
             {
-                var dict = new NonBlocking.ConcurrentDictionary<nint, long>();
+                var dict = new Alc.NonBlocking.ConcurrentDictionary<nint, long>();
 
                 foreach (var iterations in ConcurrentIterations)
                 {
@@ -393,7 +393,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void AddSetRemoveConcurrentStruct()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<S1, string>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<S1, string>();
 
             foreach (var iterations in ConcurrentIterations)
             {
@@ -408,7 +408,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void Continuity001()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<int, int>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<int, int>();
 
             Parallel.ForEach(Enumerable.Range(0, 10000),
                 (i) =>
@@ -460,7 +460,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void Continuity002()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<object, int>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<object, int>();
 
             Parallel.ForEach(Enumerable.Range(0, 10000),
                 (i) =>
@@ -512,7 +512,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void ContinuityOfRemove001()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<int, int>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<int, int>();
 
             Parallel.ForEach(Enumerable.Range(0, 10000),
                 (i) =>
@@ -585,7 +585,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void ContinuityOfRemove002()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<object, int>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<object, int>();
 
             Parallel.ForEach(Enumerable.Range(0, 10000),
                 (i) =>
@@ -657,9 +657,9 @@ namespace NonBlockingTests
         [Fact()]
         private static void Finality001()
         {
-            var dict1 = new NonBlocking.ConcurrentDictionary<int, int>();
-            var updatedBeforeRemove = new NonBlocking.ConcurrentDictionary<int, bool>();
-            var removedValue = new NonBlocking.ConcurrentDictionary<int, int>();
+            var dict1 = new Alc.NonBlocking.ConcurrentDictionary<int, int>();
+            var updatedBeforeRemove = new Alc.NonBlocking.ConcurrentDictionary<int, bool>();
+            var removedValue = new Alc.NonBlocking.ConcurrentDictionary<int, int>();
 
             Parallel.ForEach(Enumerable.Range(0, 10000),
                 new ParallelOptions(),
@@ -697,9 +697,9 @@ namespace NonBlockingTests
         [Fact()]
         private static void Finality002()
         {
-            var dict1 = new NonBlocking.ConcurrentDictionary<int, int>();
-            var updatedBeforeRemove = new NonBlocking.ConcurrentDictionary<int, bool>();
-            var removedValue = new NonBlocking.ConcurrentDictionary<int, int>();
+            var dict1 = new Alc.NonBlocking.ConcurrentDictionary<int, int>();
+            var updatedBeforeRemove = new Alc.NonBlocking.ConcurrentDictionary<int, bool>();
+            var removedValue = new Alc.NonBlocking.ConcurrentDictionary<int, int>();
 
             Parallel.ForEach(Enumerable.Range(0, 10000),
                 new ParallelOptions(),
@@ -737,9 +737,9 @@ namespace NonBlockingTests
         [Fact()]
         private static void Uniqueness001()
         {
-            var dict1 = new NonBlocking.ConcurrentDictionary<int, int>();
-            var updated1 = new NonBlocking.ConcurrentDictionary<int, bool>();
-            var updated2 = new NonBlocking.ConcurrentDictionary<int, bool>();
+            var dict1 = new Alc.NonBlocking.ConcurrentDictionary<int, int>();
+            var updated1 = new Alc.NonBlocking.ConcurrentDictionary<int, bool>();
+            var updated2 = new Alc.NonBlocking.ConcurrentDictionary<int, bool>();
 
             Parallel.ForEach(Enumerable.Range(0, 10000),
                     (i) =>
@@ -782,7 +782,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void Relativity001()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<int, int>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<int, int>();
 
             Parallel.ForEach(Enumerable.Range(0, 10001),
                 (i) =>
@@ -833,7 +833,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void Relativity002()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<object, int>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<object, int>();
 
             Parallel.ForEach(Enumerable.Range(0, 10001),
                 (i) =>
@@ -884,7 +884,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void Relativity003()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<S1, int>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<S1, int>();
 
             Parallel.ForEach(Enumerable.Range(0, 10001),
                 (i) =>
@@ -935,7 +935,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void Relativity004()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<string, int>(new NullIntolerantComparer());
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<string, int>(new NullIntolerantComparer());
 
             var keys = new string[30000];
             for (int i = 0; i < keys.Length; i++) keys[i] = i.ToString();
@@ -997,7 +997,7 @@ namespace NonBlockingTests
         [Fact()]
         private static void BadHashAdd()
         {
-            var dict = new NonBlocking.ConcurrentDictionary<BadHash, int>();
+            var dict = new Alc.NonBlocking.ConcurrentDictionary<BadHash, int>();
 
             for (int i = 0; i < 10000; i++)
             {

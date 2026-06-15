@@ -8,7 +8,7 @@ using System.Threading;
 using System.Runtime.CompilerServices;
 using System.Diagnostics;
 
-namespace NonBlocking
+namespace Alc.NonBlocking
 {
     internal sealed class DictionaryImplRef<TKey, TKeyStore, TValue>
             : DictionaryImpl<TKey, TKey, TValue>

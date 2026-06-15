@@ -1,16 +1,21 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;netstandard2.1</TargetFrameworks>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net10.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-    <PackageId>NonBlocking</PackageId>
-    <PackageVersion>2.1.2</PackageVersion>
-    <Authors>Vladimir Sadov</Authors> 
+    <AssemblyName>Alc.NonBlocking</AssemblyName>
+    <RootNamespace>Alc.NonBlocking</RootNamespace>
+
+    <PackageId>Alc.NonBlocking</PackageId>
+    <PackageVersion>2.2.0</PackageVersion>
+    <Authors>Vladimir Sadov</Authors>
     <Description>
       Implementation of a lock-free dictionary on .Net
 
       Included types:
-      === NonBlocking.ConcurrentDictionary
+      === Alc.NonBlocking.ConcurrentDictionary
       Lock-free, wait-free implementation of a dictionary.
       - has the same API as System.Collections.Concurrent.ConcurrentDictionary.
       - No locks are taken during any operation including Get, Add, Remove, internal resizes etc...
@@ -28,39 +33,41 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-        A few bug fixes and performance improvements.
+        Allocation-free enumeration: iterating the dictionary and its Keys/Values now uses struct enumerators and allocates nothing on the hot path. Keys/Values return live collection views (cached per dictionary). A new TakeSnapshot() method returns an immutable, repeatable point-in-time snapshot for callers that need frozen semantics; it is a disposable ref struct backed by a pooled (ArrayPool) buffer, so repeated captures reuse buffers instead of allocating. The namespace, package id, and assembly name are now Alc.NonBlocking (forked from VSadov/NonBlocking). Added a net10.0 target.
     </PackageReleaseNotes>
     <Summary>Implementation of a lock-free dictionary on .Net</Summary>
     <Copyright>Copyright 2023 (c) Vladimir Sadov. All rights reserved.</Copyright>
     <PackageTags>lock-free wait-free dictionary high-performance</PackageTags>
-    <PackageProjectUrl>https://github.com/VSadov/NonBlocking</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/lukasz-laszko-alpha/NonBlocking</PackageProjectUrl>
   </PropertyGroup>
 
   <PropertyGroup>
     <Nullable>enable</Nullable>
     <WarningsAsErrors>nullable</WarningsAsErrors>
     <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <DocumentationFile>bin\Release\netstandard2.1\NonBlocking.xml</DocumentationFile>
     <DebugType>pdbonly</DebugType>
     <DebugSymbols>true</DebugSymbols>
-    <LangVersion>9.0</LangVersion>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-    <LangVersion>9.0</LangVersion>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DebugType>full</DebugType>
     <DebugSymbols>true</DebugSymbols>
     <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
   </PropertyGroup>
 
-  <ItemGroup>
+  <!-- System.Runtime.CompilerServices.Unsafe is in-box on modern .NET; only the netstandard legs need the package. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' or '$(TargetFramework)' == 'netstandard2.1'">
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="4.3.0" />
+  </ItemGroup>
+
+  <!-- ArrayPool (System.Buffers) is in-box on netstandard2.1 and net10; only netstandard2.0 needs the package. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.Buffers" Version="4.5.1" />
   </ItemGroup>
 
 </Project>
