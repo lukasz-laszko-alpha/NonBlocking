@@ -1,0 +1,89 @@
+name: main-workflow
+
+# Builds, tests and packs the Alc.NonBlocking library, then publishes the
+# resulting NuGet package to Alphalab's GitHub Packages feed.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # for manual execution
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # Alphalab's NuGet (GitHub Packages, org: alphalab-hq)
+  NUGET_FEED: https://nuget.pkg.github.com/alphalab-hq/index.json
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.setup.outputs.version }}
+    steps:
+      - name: Setup
+        id: setup
+        # Versioning scheme mirrors alc-nexus: 1.<YYYY.M>.<run_number>-<short_sha>
+        run: |
+          DATE=$(date +'%Y.%-m')
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "version=1.${DATE}.${{ github.run_number }}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: init
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.init.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore NonBlocking.sln
+
+      - name: Build
+        run: dotnet build NonBlocking.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test NonBlocking.sln -c Release --no-build
+
+      - name: Pack
+        run: >
+          dotnet pack src/NonBlocking/NonBlocking.csproj
+          -c Release --no-build
+          -p:PackageVersion=$VERSION
+          -o "${{ github.workspace }}/artifacts"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: ${{ github.workspace }}/artifacts/*.nupkg
+
+      - name: Push to Alphalab NuGet
+        run: >
+          dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg"
+          --source "$NUGET_FEED"
+          --api-key "${{ secrets.GITHUB_TOKEN }}"
+          --skip-duplicate
+
+      - name: Summary
+        run: |
+          {
+            echo "## Alc.NonBlocking package published"
+            echo ""
+            echo "| Package | Version | Feed |"
+            echo "|---------|---------|------|"
+            echo "| Alc.NonBlocking | \`$VERSION\` | $NUGET_FEED |"
+          } >> "$GITHUB_STEP_SUMMARY"
