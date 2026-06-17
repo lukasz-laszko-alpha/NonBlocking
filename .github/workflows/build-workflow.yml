@@ -1,0 +1,198 @@
+name: build-workflow
+
+# Reusable build pipeline for Alc.NonBlocking: builds, tests and packs the
+# library and, when publish=true, pushes the package to Alphalab's NuGet.
+#
+# Runs on the hybrid cluster regular-sized runner profile (actions-runners-hybrid:
+# 4 CPU / 16 GB) inside the alc-build-tools build image, following the alc-nexus
+# conventions (ECR login via OIDC, container credentials from the login outputs).
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        description: 'NuGet package version to stamp on the produced package'
+        required: true
+      publish:
+        type: boolean
+        description: 'Push the produced package to Alphalab NuGet'
+        required: false
+        default: false
+      ecr-registry:
+        type: string
+        description: 'The ECR registry hosting the build image'
+        required: false
+        default: '346086605621.dkr.ecr.ap-southeast-1.amazonaws.com'
+      build-image:
+        type: string
+        description: 'The build image to run the job in'
+        required: false
+        default: 'alc-build-tools:dotnet10.0-debian12-292b68e'
+
+permissions:
+  id-token: write
+  contents: write        # github-action-benchmark commit comments on regressions
+  packages: write
+  pull-requests: write   # github-action-benchmark PR comments on regressions
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: 1
+  # Roll net8.0 test target forward onto the net10 runtime shipped in the image.
+  DOTNET_ROLL_FORWARD: LatestMajor
+  # Alphalab's NuGet (GitHub Packages, org: alphalab-hq)
+  NUGET_FEED: https://nuget.pkg.github.com/alphalab-hq/index.json
+
+jobs:
+  ecr-login:
+    runs-on: actions-runners-hybrid
+    outputs:
+      docker_username: ${{ steps.login-ecr.outputs.docker_username_346086605621_dkr_ecr_ap_southeast_1_amazonaws_com }}
+      docker_password: ${{ steps.login-ecr.outputs.docker_password_346086605621_dkr_ecr_ap_southeast_1_amazonaws_com }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::346086605621:role/github-oidc-deployer
+          aws-region: ap-southeast-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registries: "346086605621"
+          mask-password: "false"
+
+  build:
+    needs: ecr-login
+    runs-on: actions-runners-hybrid-large
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ inputs.version }}
+    container:
+      image: "${{ inputs.ecr-registry }}/${{ inputs.build-image }}"
+      credentials:
+        username: ${{ needs.ecr-login.outputs.docker_username }}
+        password: ${{ needs.ecr-login.outputs.docker_password }}
+      options: --user 1001:1001
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore
+        run: dotnet restore NonBlocking.sln
+
+      - name: Build
+        run: dotnet build NonBlocking.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test NonBlocking.sln -c Release --no-build
+
+      - name: Pack
+        run: >
+          dotnet pack src/NonBlocking/NonBlocking.csproj
+          -c Release --no-build
+          -p:PackageVersion=$VERSION
+          -o "$GITHUB_WORKSPACE/artifacts"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: ${{ github.workspace }}/artifacts/*.nupkg
+
+      - name: Push to Alphalab NuGet
+        if: ${{ inputs.publish }}
+        run: >
+          dotnet nuget push "$GITHUB_WORKSPACE/artifacts/*.nupkg"
+          --source "$NUGET_FEED"
+          --api-key "${{ secrets.GITHUB_TOKEN }}"
+          --skip-duplicate
+
+      - name: Summary
+        run: |
+          {
+            echo "## Alc.NonBlocking"
+            echo ""
+            echo "| Package | Version | Published | Feed |"
+            echo "|---------|---------|-----------|------|"
+            echo "| Alc.NonBlocking | \`$VERSION\` | ${{ inputs.publish }} | $NUGET_FEED |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Performance evaluation: runs BenchmarkDotNet, shows time + allocations, and
+  # compares against rolling history (kept in the Actions cache) to flag regressions.
+  benchmark:
+    needs: ecr-login
+    runs-on: actions-runners-hybrid-large
+    timeout-minutes: 30
+    env:
+      HOME: /home/bob
+      # Path BenchmarkDotNet writes its results to (Namespace.Class-report-*).
+      BDN_GITHUB_MD: BenchmarkDotNet.Artifacts/results/NonBlockingTests.EnumerationBenchmarks-report-github.md
+      BDN_JSON: BenchmarkDotNet.Artifacts/results/NonBlockingTests.EnumerationBenchmarks-report-full-compressed.json
+    container:
+      image: "${{ inputs.ecr-registry }}/${{ inputs.build-image }}"
+      credentials:
+        username: ${{ needs.ecr-login.outputs.docker_username }}
+        password: ${{ needs.ecr-login.outputs.docker_password }}
+      options: --user 1001:1001
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run benchmarks
+        # --job short keeps CI time bounded; allocations stay exact, timings are approximate.
+        run: dotnet run -c Release --project BenchmarksCore/BenchmarksCore.csproj -- bdn --filter '*EnumerationBenchmarks*' --job short
+
+      - name: Add benchmark results to job summary
+        if: success() || failure()
+        run: |
+          {
+            echo "## Benchmark results (Alc.NonBlocking)"
+            echo ""
+            cat "$BDN_GITHUB_MD"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark artifacts
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: BenchmarkDotNet.Artifacts/**
+
+      # Restore the rolling baseline. On a PR this picks up the latest baseline
+      # saved on main (caches created on the base branch are visible to PRs).
+      - name: Restore benchmark history
+        uses: actions/cache/restore@v4
+        with:
+          path: ./benchmark-cache
+          key: benchmark-history-${{ github.run_id }}
+          restore-keys: |
+            benchmark-history-
+
+      - name: Compare against history and flag regressions
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Alc.NonBlocking benchmarks
+          tool: benchmarkdotnet
+          output-file-path: ${{ env.BDN_JSON }}
+          external-data-json-path: ./benchmark-cache/benchmark-data.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          summary-always: true
+          comment-on-alert: true
+          alert-threshold: '150%'
+          # Timings on the shared runner are noisy, so do not break the build;
+          # regressions surface as a PR comment and in the job summary.
+          fail-on-alert: false
+          # Only main updates the stored baseline; PRs compare without writing.
+          save-data-file: ${{ inputs.publish }}
+
+      # Persist the updated baseline only on main.
+      - name: Save benchmark history
+        if: ${{ inputs.publish }}
+        uses: actions/cache/save@v4
+        with:
+          path: ./benchmark-cache
+          key: benchmark-history-${{ github.run_id }}

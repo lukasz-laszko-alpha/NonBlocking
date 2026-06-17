@@ -9,7 +9,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-namespace NonBlocking
+namespace Alc.NonBlocking
 {
     /// <summary>
     /// Scalable 64bit counter that can be used from multiple threads.

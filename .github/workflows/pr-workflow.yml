@@ -1,0 +1,36 @@
+name: pr-workflow
+
+# Builds, tests and packs Alc.NonBlocking on every pull request (no publish).
+# Delegates the actual build/test/pack to the reusable build-workflow.
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: # for manual execution
+
+permissions:
+  id-token: write
+  contents: write
+  packages: write
+  pull-requests: write
+
+jobs:
+  init:
+    runs-on: actions-runners-hybrid
+    outputs:
+      version: ${{ steps.setup.outputs.version }}
+    steps:
+      - name: Setup
+        id: setup
+        # Versioning scheme mirrors alc-nexus: 1.<YYYY.M>.<run_number>-pr-<pr_number>-<short_sha>
+        run: |
+          DATE=$(date +'%Y.%-m')
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "version=1.${DATE}.${{ github.run_number }}-pr-${{ github.event.number }}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: init
+    uses: ./.github/workflows/build-workflow.yml
+    with:
+      version: ${{ needs.init.outputs.version }}
+      publish: false

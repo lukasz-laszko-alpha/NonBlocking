@@ -9,7 +9,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
-namespace NonBlocking
+namespace Alc.NonBlocking
 {
     internal abstract class DictionaryImpl<TKey, TValue>
         : DictionaryImpl
@@ -29,6 +29,15 @@ namespace NonBlocking
         internal abstract TValue GetOrAdd(TKey key, Func<TKey, TValue> valueFactory);
 
         internal abstract Snapshot GetSnapshot();
+
+        // Resolves a quiescent inner table to iterate over (the snapshot linearization point).
+        // Used by the allocation-free struct enumerator so it can be created without allocating.
+        internal abstract DictionaryImpl<TKey, TValue> GetTableForSnapshot();
+
+        // Advances over the resolved table's entries starting at idx. Returns false when exhausted.
+        // 'this' must be the table returned by GetTableForSnapshot. Shared by the struct enumerator
+        // and SnapshotImpl so there is a single traversal implementation.
+        internal abstract bool MoveNextSnapshot(ref int idx, out TKey key, out TValue value);
 
         internal abstract class Snapshot
         {
