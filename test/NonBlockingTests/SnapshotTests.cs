@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Xunit;
 using NB = Alc.NonBlocking;
 
@@ -194,6 +195,79 @@ namespace NonBlockingTests
 
                 Assert.Equal(1000, seen.Count);
             }
+        }
+
+        [Fact]
+        public static void TakeSnapshot_DoesNotDropEntries_UnderConcurrentInserts()
+        {
+            // Pre-size generously so the inserts below never trigger a resize. This isolates the
+            // behavior under test (the snapshot's reliance on the approximate size counter) from
+            // any resize/migration races.
+            const int Target = 50_000;
+            var d = new NB.ConcurrentDictionary<int, int>(Environment.ProcessorCount, Target * 4);
+
+            // High-water mark: the largest key index the writer has fully committed. It is published
+            // with a release write *after* the insert returns, so a reader that observes it with an
+            // acquire read is guaranteed that every key in [0, hw] is present and (never being
+            // removed) must therefore appear in any snapshot taken afterwards.
+            int[] hwBox = { -1 };
+
+            var done = new ManualResetEventSlim(false);
+            var writer = new Thread(() =>
+            {
+                for (int k = 0; k < Target; k++)
+                {
+                    d[k] = k * 2;
+                    Volatile.Write(ref hwBox[0], k);
+                }
+
+                done.Set();
+            })
+            { IsBackground = true };
+
+            writer.Start();
+
+            string failure = null;
+            int iterations = 0;
+
+            while (!done.IsSet && failure == null)
+            {
+                iterations++;
+
+                int hwBefore = Volatile.Read(ref hwBox[0]);
+                if (hwBefore < 0)
+                {
+                    continue;
+                }
+
+                using var snap = d.TakeSnapshot();
+
+                var present = new HashSet<int>(snap.Count);
+                foreach (var kv in snap)
+                {
+                    if (kv.Value != kv.Key * 2)
+                    {
+                        failure = $"snapshot exposed an inconsistent value for key {kv.Key}: {kv.Value}";
+                        break;
+                    }
+
+                    present.Add(kv.Key);
+                }
+
+                for (int i = 0; i <= hwBefore && failure == null; i++)
+                {
+                    if (!present.Contains(i))
+                    {
+                        failure =
+                            $"snapshot dropped key {i}, which was present before the snapshot was taken " +
+                            $"(snapshot held {present.Count} entries; at least {hwBefore + 1} were present).";
+                    }
+                }
+            }
+
+            writer.Join();
+
+            Assert.True(failure == null, $"{failure} (after {iterations} snapshot iterations)");
         }
     }
 }

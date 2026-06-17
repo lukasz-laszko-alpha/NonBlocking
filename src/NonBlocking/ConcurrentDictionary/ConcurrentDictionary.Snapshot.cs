@@ -39,22 +39,51 @@ namespace Alc.NonBlocking
             // linearization point: resolve a quiescent table, then copy once.
             var table = _table.GetTableForSnapshot();
 
-            int count = table.Count;
-            if (count == 0)
+            // Probe for emptiness by traversal rather than trusting Count. Count comes from an
+            // approximate, striped counter whose reads can lag concurrent inserts: the insert path
+            // publishes the entry value before it increments the counter, so a non-empty table can
+            // momentarily report a smaller value (even zero). A genuinely empty table allocates nothing.
+            var cursor = 0;
+            if (!table.MoveNextSnapshot(ref cursor, out var firstKey, out var firstValue))
             {
                 return new Snapshot(Array.Empty<KeyValuePair<TKey, TValue>>(), 0, pooled: false);
             }
 
-            // The pooled buffer is at least 'count' long (often larger); the real length is tracked separately.
-            var array = ArrayPool<KeyValuePair<TKey, TValue>>.Shared.Rent(count);
-            int idx = 0;
-            int cursor = 0;
-            while (idx < count && table.MoveNextSnapshot(ref cursor, out var key, out var value))
+            // Count is only a size hint for the initial rent. The traversal — not the counter —
+            // decides how many elements the snapshot contains, so a lagging counter can never
+            // truncate the result. The buffer grows if more live entries are found than hinted.
+            var hint = table.Count;
+            var array = ArrayPool<KeyValuePair<TKey, TValue>>.Shared.Rent(hint > 0 ? hint : 16);
+            var idx = 0;
+            array[idx++] = new KeyValuePair<TKey, TValue>(firstKey, firstValue);
+
+            while (table.MoveNextSnapshot(ref cursor, out var key, out var value))
             {
+                if (idx == array.Length)
+                {
+                    var grown = ArrayPool<KeyValuePair<TKey, TValue>>.Shared.Rent(array.Length * 2);
+                    Array.Copy(array, grown, idx);
+                    ReturnBuffer(array);
+                    array = grown;
+                }
+
                 array[idx++] = new KeyValuePair<TKey, TValue>(key, value);
             }
 
             return new Snapshot(array, idx, pooled: true);
+        }
+
+        // Returns a pooled buffer with the same clearing semantics as Snapshot.Dispose, used both when
+        // the snapshot buffer has to grow mid-capture and when the snapshot is disposed.
+        private static void ReturnBuffer(KeyValuePair<TKey, TValue>[] buffer)
+        {
+#if NETSTANDARD2_1_OR_GREATER || NET
+            ArrayPool<KeyValuePair<TKey, TValue>>.Shared.Return(
+                buffer,
+                clearArray: RuntimeHelpers.IsReferenceOrContainsReferences<KeyValuePair<TKey, TValue>>());
+#else
+            ArrayPool<KeyValuePair<TKey, TValue>>.Shared.Return(buffer, clearArray: true);
+#endif
         }
 
         /// <summary>
@@ -109,13 +138,7 @@ namespace Alc.NonBlocking
                 _items = null;
                 if (_pooled && items != null)
                 {
-#if NETSTANDARD2_1_OR_GREATER || NET
-                    ArrayPool<KeyValuePair<TKey, TValue>>.Shared.Return(
-                        items,
-                        clearArray: RuntimeHelpers.IsReferenceOrContainsReferences<KeyValuePair<TKey, TValue>>());
-#else
-                    ArrayPool<KeyValuePair<TKey, TValue>>.Shared.Return(items, clearArray: true);
-#endif
+                    ReturnBuffer(items);
                 }
             }
 

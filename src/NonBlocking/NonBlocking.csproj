@@ -38,7 +38,7 @@
     <Summary>Implementation of a lock-free dictionary on .Net</Summary>
     <Copyright>Copyright 2023 (c) Vladimir Sadov. All rights reserved.</Copyright>
     <PackageTags>lock-free wait-free dictionary high-performance</PackageTags>
-    <PackageProjectUrl>https://github.com/lukasz-laszko-alpha/NonBlocking</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/alphalab-hq/NonBlocking</PackageProjectUrl>
   </PropertyGroup>
 
   <PropertyGroup>

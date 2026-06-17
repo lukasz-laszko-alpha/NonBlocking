@@ -447,16 +447,27 @@ namespace Alc.NonBlocking
         {
             var snapshot = _table.GetSnapshot();
 
-            int count = snapshot.Count;
-            if (count == 0)
+            // Probe for emptiness by traversal rather than trusting Count. Count comes from an
+            // approximate, striped counter whose reads can lag concurrent inserts, so termination is
+            // driven by the traversal returning no more elements, not by the counter. Count is only
+            // an initial sizing hint; the array grows if more live entries are found than hinted.
+            if (!snapshot.MoveNext())
             {
                 return Array.Empty<KeyValuePair<TKey, TValue>>();
             }
 
-            var array = new KeyValuePair<TKey, TValue>[count];
+            int hint = snapshot.Count;
+            var array = new KeyValuePair<TKey, TValue>[hint > 0 ? hint : 4];
             int idx = 0;
-            while (snapshot.MoveNext() && idx < array.Length)
+            array[idx++] = snapshot.Current;
+
+            while (snapshot.MoveNext())
             {
+                if (idx == array.Length)
+                {
+                    Array.Resize(ref array, array.Length * 2);
+                }
+
                 array[idx++] = snapshot.Current;
             }
 
