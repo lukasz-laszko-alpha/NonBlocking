@@ -222,6 +222,97 @@ namespace NonBlockingTests
         }
 
         [Fact]
+        public static void RefKey_IntValue_Insert_NoValueBox()
+        {
+            // <string,int>: reference key + inline value. The very common case where today the
+            // int value boxes. Pre-built keys + pre-sized table isolate the value side: a stored
+            // int must add no per-entry heap object.
+            const int N = 20000;
+            var keys = new string[N];
+            for (int i = 0; i < N; i++) keys[i] = "k" + i;
+
+            for (int w = 0; w < 4; w++)
+            {
+                var warm = new NB.ConcurrentDictionary<string, int>(1, N, null);
+                for (int i = 0; i < N; i++) warm.TryAdd(keys[i], i);
+            }
+
+            var d = new NB.ConcurrentDictionary<string, int>(1, N, null);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < N; i++) d.TryAdd(keys[i], i);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.True(allocated < 2048,
+                $"<string,int> inserting {N} entries allocated {allocated} bytes (expected ~0; the boxed value path would allocate ~{N * 24} bytes)");
+            Assert.Equal(N, d.Count);
+            for (int i = 0; i < N; i++)
+            {
+                Assert.True(d.TryGetValue(keys[i], out var v));
+                Assert.Equal(i, v);
+            }
+        }
+
+        [Fact]
+        public static void LongKey_And_NintKey_RoundTripAndChurn()
+        {
+            const int N = 50_000;
+
+            var dl = new NB.ConcurrentDictionary<long, int>();
+            for (int i = 0; i < N; i++) Assert.True(dl.TryAdd((long)i << 33, i));
+            for (int i = 0; i < N; i++) Assert.Equal(i, dl[(long)i << 33]);
+            for (int i = 0; i < N; i += 2) Assert.True(dl.TryRemove((long)i << 33, out _));
+            Assert.Equal(N / 2, dl.Count);
+
+            var dn = new NB.ConcurrentDictionary<nint, int>();
+            for (int i = 0; i < N; i++) Assert.True(dn.TryAdd((nint)(i + 1), i));
+            for (int i = 0; i < N; i++) Assert.Equal(i, dn[(nint)(i + 1)]);
+            Assert.Equal(N, dn.Count);
+        }
+
+        [Fact]
+        public static void RefKey_IntValue_ConcurrentStress()
+        {
+            const int threads = 8;
+            const int perThread = 20_000;
+            var d = new NB.ConcurrentDictionary<string, int>();
+
+            // pre-build disjoint keys per thread to avoid measuring string allocation in the race
+            var keys = new string[threads][];
+            for (int t = 0; t < threads; t++)
+            {
+                keys[t] = new string[perThread];
+                for (int i = 0; i < perThread; i++) keys[t][i] = $"t{t}_k{i}";
+            }
+
+            Parallel.For(0, threads, t =>
+            {
+                var k = keys[t];
+                for (int i = 0; i < perThread; i++) Assert.True(d.TryAdd(k[i], i));
+                for (int i = 0; i < perThread; i++) d[k[i]] = i + 1;
+                for (int i = 0; i < perThread; i++) if (i % 5 == 0) Assert.True(d.TryRemove(k[i], out var rv) && rv == i + 1);
+            });
+
+            int expected = 0;
+            for (int t = 0; t < threads; t++)
+            {
+                for (int i = 0; i < perThread; i++)
+                {
+                    if (i % 5 == 0)
+                    {
+                        Assert.False(d.ContainsKey(keys[t][i]));
+                    }
+                    else
+                    {
+                        Assert.True(d.TryGetValue(keys[t][i], out var v));
+                        Assert.Equal(i + 1, v);
+                        expected++;
+                    }
+                }
+            }
+            Assert.Equal(expected, d.Count);
+        }
+
+        [Fact]
         public static void Concurrent_Stress_MatchesOracle()
         {
             // Many threads partition the key space (disjoint), each owns add/update/remove of its keys.

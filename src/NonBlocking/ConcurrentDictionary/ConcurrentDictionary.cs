@@ -199,7 +199,9 @@ namespace Alc.NonBlocking
 
             if (!typeof(TKey).IsValueType)
             {
-                _table = new DictionaryImplRef<TKey, TKey, TValue>(capacity, this);
+                _table = s_valueIsAtomic32
+                    ? (DictionaryImpl<TKey, TValue>)new DictionaryImplRefValAtomic<TKey, TKey, TValue>(capacity, this)
+                    : new DictionaryImplRef<TKey, TKey, TValue>(capacity, this);
                 _table._keyComparer = comparer ?? EqualityComparer<TKey>.Default;
                 return;
             }
@@ -227,11 +229,15 @@ namespace Alc.NonBlocking
                 {
                     if (comparer == null)
                     {
-                        _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<long, TValue>>(this)));
+                        _table = s_valueIsAtomic32
+                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongValAtomicNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<long, TValue>>(this)))
+                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<long, TValue>>(this)));
                     }
                     else
                     {
-                        _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLong<TValue>(capacity, Unsafe.As<ConcurrentDictionary<long, TValue>>(this)));
+                        _table = s_valueIsAtomic32
+                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongValAtomic<TValue>(capacity, Unsafe.As<ConcurrentDictionary<long, TValue>>(this)))
+                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLong<TValue>(capacity, Unsafe.As<ConcurrentDictionary<long, TValue>>(this)));
                         _table._keyComparer = comparer;
                     }
                     return;
@@ -241,11 +247,15 @@ namespace Alc.NonBlocking
                 {
                     if (comparer == null)
                     {
-                        _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<nint, TValue>>(this)));
+                        _table = s_valueIsAtomic32
+                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintValAtomicNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<nint, TValue>>(this)))
+                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<nint, TValue>>(this)));
                     }
                     else
                     {
-                        _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNint<TValue>(capacity, Unsafe.As<ConcurrentDictionary<nint, TValue>>(this)));
+                        _table = s_valueIsAtomic32
+                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintValAtomic<TValue>(capacity, Unsafe.As<ConcurrentDictionary<nint, TValue>>(this)))
+                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNint<TValue>(capacity, Unsafe.As<ConcurrentDictionary<nint, TValue>>(this)));
                         _table._keyComparer = comparer;
                     }
                     return;
