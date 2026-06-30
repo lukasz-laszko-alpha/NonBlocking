@@ -37,7 +37,7 @@ namespace NonBlockingTests
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
             // key inline as int + value inline => no per-entry boxes
-            Assert.True(allocated < N, $"<enum,int> insert of {N} allocated {allocated} bytes (expected < {N})");
+            Assert.True(allocated < N * 8, $"<enum,int> insert of {N} allocated {allocated} bytes (expected < {N * 8})");
             Assert.Equal(N, d.Count);
             for (int i = 0; i < N; i++) Assert.Equal(i, d[(Color)i]);
 

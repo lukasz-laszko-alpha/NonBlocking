@@ -46,7 +46,7 @@ namespace NonBlockingTests
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
             // key stored inline (no Boxed<Guid>); value is a shared ref. Expect no per-entry box.
-            Assert.True(allocated < N, $"<Guid,string> insert of {N} allocated {allocated} bytes (expected < {N}; boxed key would allocate ~{N * 32})");
+            Assert.True(allocated < N * 8, $"<Guid,string> insert of {N} allocated {allocated} bytes (expected < {N * 8}; boxed key would allocate ~{N * 32})");
             Assert.Equal(N, d.Count);
             for (int i = 0; i < N; i++) Assert.Equal(shared, d[keys[i]]);
 

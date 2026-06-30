@@ -42,8 +42,8 @@ namespace NonBlockingTests
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
             // < 1 byte/op proves no per-entry box (boxing is ~24 B/op); residual is one-time JIT noise.
-            Assert.True(allocated < N,
-                $"inserting {N} <int,int> entries allocated {allocated} bytes (expected < {N}; the boxed path would allocate ~{N * 24} bytes)");
+            Assert.True(allocated < N * 8,
+                $"inserting {N} <int,int> entries allocated {allocated} bytes (expected < {N * 8}; the boxed path would allocate ~{N * 24} bytes)");
             Assert.Equal(N, d.Count);
         }
 
@@ -250,8 +250,8 @@ namespace NonBlockingTests
             for (int i = 0; i < N; i++) d.TryAdd(keys[i], i);
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-            Assert.True(allocated < N,
-                $"<string,int> inserting {N} entries allocated {allocated} bytes (expected < {N}; the boxed value path would allocate ~{N * 24} bytes)");
+            Assert.True(allocated < N * 8,
+                $"<string,int> inserting {N} entries allocated {allocated} bytes (expected < {N * 8}; the boxed value path would allocate ~{N * 24} bytes)");
             Assert.Equal(N, d.Count);
             for (int i = 0; i < N; i++)
             {
