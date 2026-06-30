@@ -75,6 +75,26 @@ namespace Alc.NonBlocking
         // optimization is skipped there (correct boxed fallback).
         private static readonly bool s_valueIsInlineableStruct = ComputeValueIsInlineableStruct();
 
+        // Phase 3a: an int/uint- or long/ulong-backed enum key is bit-identical to its underlying
+        // integer, so (with the default comparer) it can reuse the existing int/long key leaves via
+        // the same reinterpret trick already used for uint/ulong - eliminating the per-key Boxed<TKey>
+        // with no new impl class. Only safe when comparer == null (a custom enum comparer cannot be
+        // reinterpreted to an int/long comparer); enums with byte/short underlying types are smaller
+        // than the int slot and keep the boxed path.
+        private static readonly bool s_keyIsEnumInt32 = ComputeKeyIsEnumOf(typeof(int), typeof(uint));
+        private static readonly bool s_keyIsEnumInt64 = ComputeKeyIsEnumOf(typeof(long), typeof(ulong));
+
+        private static bool ComputeKeyIsEnumOf(Type a, Type b)
+        {
+            if (!typeof(TKey).IsEnum)
+            {
+                return false;
+            }
+
+            Type u = Enum.GetUnderlyingType(typeof(TKey));
+            return u == a || u == b;
+        }
+
         private static bool ComputeValueIsInlineableStruct()
         {
             if (default(TValue) == null || s_valueIsAtomic32)
@@ -234,7 +254,7 @@ namespace Alc.NonBlocking
             }
             else
             {
-                if (typeof(TKey) == typeof(int) || (typeof(TKey) == typeof(uint) && comparer == null))
+                if (typeof(TKey) == typeof(int) || ((typeof(TKey) == typeof(uint) || s_keyIsEnumInt32) && comparer == null))
                 {
                     var intTop = Unsafe.As<ConcurrentDictionary<int, TValue>>(this);
                     if (comparer == null)
@@ -259,7 +279,7 @@ namespace Alc.NonBlocking
                     return;
                 }
 
-                if (typeof(TKey) == typeof(long) || (typeof(TKey) == typeof(ulong) && comparer == null))
+                if (typeof(TKey) == typeof(long) || ((typeof(TKey) == typeof(ulong) || s_keyIsEnumInt64) && comparer == null))
                 {
                     var longTop = Unsafe.As<ConcurrentDictionary<long, TValue>>(this);
                     if (comparer == null)
