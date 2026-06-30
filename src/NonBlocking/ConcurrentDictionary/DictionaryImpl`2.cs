@@ -39,6 +39,26 @@ namespace Alc.NonBlocking
         // and SnapshotImpl so there is a single traversal implementation.
         internal abstract bool MoveNextSnapshot(ref int idx, out TKey key, out TValue value);
 
+        // Non-boxing lookup. Returns true and the value when present; false otherwise.
+        // The default forwards through the object-returning TryGetValue (unboxing via FromObjectValue),
+        // which preserves existing behavior for the Boxed/Ref impls. Value-inline impls (e.g. the
+        // encoded-long-slot specialization) override this to decode the value directly with no boxing,
+        // which is the whole point of the inline storage; for those, the object-returning TryGetValue
+        // is unused.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal virtual bool TryGetValueUnboxed(TKey key, out TValue value)
+        {
+            object obj = TryGetValue(key);
+            if (obj == null)
+            {
+                value = default(TValue);
+                return false;
+            }
+
+            value = FromObjectValue(obj);
+            return true;
+        }
+
         internal abstract class Snapshot
         {
             protected int _idx;

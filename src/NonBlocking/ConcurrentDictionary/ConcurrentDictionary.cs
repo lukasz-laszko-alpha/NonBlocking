@@ -38,6 +38,33 @@ namespace Alc.NonBlocking
         internal object _sweeperInstance;
         internal int _sweepRequests;
 
+        // True when TValue is a non-nullable primitive whose payload fits in <= 32 bits, so it can be
+        // stored inline in an encoded 64-bit value slot (state tag in the high bits, value bits in the
+        // low 32) instead of a heap-allocated Boxed<TValue>. This keeps value-type values out of the
+        // GC-traced heap entirely (the Entry[] table holds the bytes), eliminating the per-key box and
+        // the gen2 pressure it creates. Larger/other value types keep the Boxed path.
+        // Whitelist (not SizeOf<=4) so it is provably reference-free on every target framework,
+        // including netstandard2.0 where RuntimeHelpers.IsReferenceOrContainsReferences is unavailable.
+        private static readonly bool s_valueIsAtomic32 = ComputeValueIsAtomic32();
+
+        private static bool ComputeValueIsAtomic32()
+        {
+            if (default(TValue) == null)
+            {
+                return false;
+            }
+
+            return typeof(TValue) == typeof(bool) ||
+                   typeof(TValue) == typeof(byte) ||
+                   typeof(TValue) == typeof(sbyte) ||
+                   typeof(TValue) == typeof(char) ||
+                   typeof(TValue) == typeof(short) ||
+                   typeof(TValue) == typeof(ushort) ||
+                   typeof(TValue) == typeof(int) ||
+                   typeof(TValue) == typeof(uint) ||
+                   typeof(TValue) == typeof(float);
+        }
+
         /// <summary>The default capacity, i.e. the initial # of buckets.</summary>
         /// <remarks>
         /// When choosing this value, we are making a trade-off between the size of a very small dictionary,
@@ -182,11 +209,15 @@ namespace Alc.NonBlocking
                 {
                     if (comparer == null)
                     {
-                        _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<int, TValue>>(this)));
+                        _table = s_valueIsAtomic32
+                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntValAtomicNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<int, TValue>>(this)))
+                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<int, TValue>>(this)));
                     }
                     else
                     {
-                        _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplInt<TValue>(capacity, Unsafe.As<ConcurrentDictionary<int, TValue>>(this)));
+                        _table = s_valueIsAtomic32
+                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntValAtomic<TValue>(capacity, Unsafe.As<ConcurrentDictionary<int, TValue>>(this)))
+                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplInt<TValue>(capacity, Unsafe.As<ConcurrentDictionary<int, TValue>>(this)));
                         _table._keyComparer = comparer;
                     }
                     return;
@@ -260,10 +291,7 @@ namespace Alc.NonBlocking
                 ThrowHelper.ThrowKeyNullException();
             }
 
-            object oldValObj = _table.TryGetValue(key);
-            Debug.Assert(!(oldValObj is Prime));
-
-            return oldValObj != null;
+            return _table.TryGetValueUnboxed(key, out _);
         }
 
         /// <summary>
@@ -369,20 +397,7 @@ namespace Alc.NonBlocking
                 ThrowHelper.ThrowKeyNullException();
             }
 
-            object oldValObj = _table.TryGetValue(key);
-
-            Debug.Assert(!(oldValObj is Prime));
-
-            if (oldValObj != null)
-            {
-                value = FromObjectValue(oldValObj);
-                return true;
-            }
-            else
-            {
-                value = default(TValue);
-                return false;
-            }
+            return _table.TryGetValueUnboxed(key, out value);
         }
 
         /// <summary>
@@ -618,11 +633,8 @@ namespace Alc.NonBlocking
                     ThrowHelper.ThrowKeyNullException();
                 }
 
-                object oldValObj = _table.TryGetValue(key);
-                Debug.Assert(oldValObj is not Prime);
-
-                return oldValObj != null
-                    ? FromObjectValue(oldValObj)
+                return _table.TryGetValueUnboxed(key, out var value)
+                    ? value
                     : ThrowKeyNotFoundException();
             }
             set
@@ -733,12 +745,9 @@ namespace Alc.NonBlocking
                 ThrowHelper.ThrowArgumentNullException(nameof(valueFactory));
             }
 
-            object oldValObj = _table.TryGetValue(key);
-            Debug.Assert(!(oldValObj is Prime));
-
-            if (oldValObj != null)
+            if (_table.TryGetValueUnboxed(key, out var existingValue))
             {
-                return FromObjectValue(oldValObj);
+                return existingValue;
             }
             else
             {
