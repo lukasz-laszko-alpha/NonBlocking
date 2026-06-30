@@ -223,9 +223,12 @@ namespace Alc.NonBlocking
 
             if (!typeof(TKey).IsValueType)
             {
-                _table = s_valueIsAtomic32
-                    ? (DictionaryImpl<TKey, TValue>)new DictionaryImplRefValAtomic<TKey, TKey, TValue>(capacity, this)
-                    : new DictionaryImplRef<TKey, TKey, TValue>(capacity, this);
+                if (s_valueIsAtomic32)
+                    _table = new DictionaryImplRefValAtomic<TKey, TKey, TValue>(capacity, this);
+                else if (s_valueIsInlineableStruct)
+                    _table = new DictionaryImplRefValSeqlock<TKey, TKey, TValue>(capacity, this);
+                else
+                    _table = new DictionaryImplRef<TKey, TKey, TValue>(capacity, this);
                 _table._keyComparer = comparer ?? EqualityComparer<TKey>.Default;
                 return;
             }
@@ -258,17 +261,24 @@ namespace Alc.NonBlocking
 
                 if (typeof(TKey) == typeof(long) || (typeof(TKey) == typeof(ulong) && comparer == null))
                 {
+                    var longTop = Unsafe.As<ConcurrentDictionary<long, TValue>>(this);
                     if (comparer == null)
                     {
-                        _table = s_valueIsAtomic32
-                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongValAtomicNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<long, TValue>>(this)))
-                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<long, TValue>>(this)));
+                        if (s_valueIsAtomic32)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongValAtomicNoComparer<TValue>(capacity, longTop));
+                        else if (s_valueIsInlineableStruct)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongValSeqlockNoComparer<TValue>(capacity, longTop));
+                        else
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongNoComparer<TValue>(capacity, longTop));
                     }
                     else
                     {
-                        _table = s_valueIsAtomic32
-                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongValAtomic<TValue>(capacity, Unsafe.As<ConcurrentDictionary<long, TValue>>(this)))
-                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLong<TValue>(capacity, Unsafe.As<ConcurrentDictionary<long, TValue>>(this)));
+                        if (s_valueIsAtomic32)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongValAtomic<TValue>(capacity, longTop));
+                        else if (s_valueIsInlineableStruct)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLongValSeqlock<TValue>(capacity, longTop));
+                        else
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplLong<TValue>(capacity, longTop));
                         _table._keyComparer = comparer;
                     }
                     return;
@@ -276,17 +286,24 @@ namespace Alc.NonBlocking
 
                 if (typeof(TKey) == typeof(nint) || (typeof(TKey) == typeof(nuint) && comparer == null))
                 {
+                    var nintTop = Unsafe.As<ConcurrentDictionary<nint, TValue>>(this);
                     if (comparer == null)
                     {
-                        _table = s_valueIsAtomic32
-                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintValAtomicNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<nint, TValue>>(this)))
-                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<nint, TValue>>(this)));
+                        if (s_valueIsAtomic32)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintValAtomicNoComparer<TValue>(capacity, nintTop));
+                        else if (s_valueIsInlineableStruct)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintValSeqlockNoComparer<TValue>(capacity, nintTop));
+                        else
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintNoComparer<TValue>(capacity, nintTop));
                     }
                     else
                     {
-                        _table = s_valueIsAtomic32
-                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintValAtomic<TValue>(capacity, Unsafe.As<ConcurrentDictionary<nint, TValue>>(this)))
-                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNint<TValue>(capacity, Unsafe.As<ConcurrentDictionary<nint, TValue>>(this)));
+                        if (s_valueIsAtomic32)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintValAtomic<TValue>(capacity, nintTop));
+                        else if (s_valueIsInlineableStruct)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNintValSeqlock<TValue>(capacity, nintTop));
+                        else
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplNint<TValue>(capacity, nintTop));
                         _table._keyComparer = comparer;
                     }
                     return;

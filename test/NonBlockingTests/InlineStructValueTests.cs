@@ -229,6 +229,37 @@ namespace NonBlockingTests
         }
 
         [Fact]
+        public static void RefKey_And_LongKey_StructValues()
+        {
+            // <string, Guid>: reference key + seqlock struct value (the ref-key Phase 2 leaf).
+            const int N = 30_000;
+            var keys = new string[N];
+            for (int i = 0; i < N; i++) keys[i] = "k" + i;
+
+            Guid V(int i) => new Guid(i, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+            for (int w = 0; w < 4; w++)
+            {
+                var warm = new NB.ConcurrentDictionary<string, Guid>(1, N, null);
+                for (int i = 0; i < N; i++) warm.TryAdd(keys[i], V(i));
+            }
+
+            var d = new NB.ConcurrentDictionary<string, Guid>(1, N, null);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < N; i++) d.TryAdd(keys[i], V(i));
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.True(allocated < N, $"<string,Guid> inserting {N} allocated {allocated} bytes (expected < {N})");
+            Assert.Equal(N, d.Count);
+            for (int i = 0; i < N; i++) Assert.Equal(V(i), d[keys[i]]);
+
+            // <long, double>: long key + seqlock double value
+            var dl = new NB.ConcurrentDictionary<long, double>();
+            for (int i = 0; i < 50_000; i++) Assert.True(dl.TryAdd((long)i << 33, i * 1.5));
+            for (int i = 0; i < 50_000; i++) Assert.Equal(i * 1.5, dl[(long)i << 33]);
+        }
+
+        [Fact]
         public static void LongValue_Concurrent_Stress_MatchesOracle()
         {
             const int threads = 8;
