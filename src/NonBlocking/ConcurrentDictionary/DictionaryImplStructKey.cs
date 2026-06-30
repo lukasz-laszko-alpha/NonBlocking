@@ -747,8 +747,8 @@ namespace Alc.NonBlocking
             if (newTable != null || entryValue == TOMBPRIME)
             {
                 var newTable1 = curTable.CopySlotAndGetNewTable(ref entry, shouldHelp: true);
-                Debug.Assert(newTable == newTable1);
-                curTable = newTable;
+                Debug.Assert(newTable == newTable1 || (newTable == null && newTable1 == this));
+                curTable = newTable1;
                 goto TRY_WITH_NEW_TABLE;
             }
 
@@ -893,8 +893,8 @@ namespace Alc.NonBlocking
             if (newTable != null || entryValue == TOMBPRIME)
             {
                 var newTable1 = curTable.CopySlotAndGetNewTable(ref entry, shouldHelp: false);
-                Debug.Assert(newTable == newTable1);
-                curTable = newTable;
+                Debug.Assert(newTable == newTable1 || (newTable == null && newTable1 == this));
+                curTable = newTable1;
                 goto TRY_WITH_NEW_TABLE;
             }
 
