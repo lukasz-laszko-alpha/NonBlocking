@@ -330,7 +330,12 @@ namespace Alc.NonBlocking
                 }
             }
 
-            _table = new DictionaryImplBoxed<TKey, TValue>(capacity, this);
+            // Remaining value-type keys (Guid/decimal/DateTime/byte/short/float/custom structs and
+            // byte/short-backed enums) store the key INLINE in the entry via the write-once commit
+            // protocol (DictionaryImplStructKey), eliminating Boxed<TKey>. Works with any comparer.
+            // Reference keys never reach here (handled above), and DictionaryImplBoxed is retained
+            // only as the home of the Boxed<T> value wrapper.
+            _table = new DictionaryImplStructKey<TKey, TValue>(capacity, this);
             _table._keyComparer = comparer ?? EqualityComparer<TKey>.Default;
         }
 
