@@ -332,10 +332,16 @@ namespace Alc.NonBlocking
 
             // Remaining value-type keys (Guid/decimal/DateTime/byte/short/float/custom structs and
             // byte/short-backed enums) store the key INLINE in the entry via the write-once commit
-            // protocol (DictionaryImplStructKey), eliminating Boxed<TKey>. Works with any comparer.
-            // Reference keys never reach here (handled above), and DictionaryImplBoxed is retained
-            // only as the home of the Boxed<T> value wrapper.
-            _table = new DictionaryImplStructKey<TKey, TValue>(capacity, this);
+            // protocol, eliminating Boxed<TKey>. The value side is chosen the same way as for the
+            // inline-key paths, so e.g. <Guid,int> and <Guid,long> inline BOTH key and value (no
+            // per-entry heap object). Reference keys never reach here (handled above);
+            // DictionaryImplBoxed is retained only as the home of the Boxed<T> value wrapper.
+            if (s_valueIsAtomic32)
+                _table = new DictionaryImplStructKeyValAtomic<TKey, TValue>(capacity, this);
+            else if (s_valueIsInlineableStruct)
+                _table = new DictionaryImplStructKeyValSeqlock<TKey, TValue>(capacity, this);
+            else
+                _table = new DictionaryImplStructKey<TKey, TValue>(capacity, this);
             _table._keyComparer = comparer ?? EqualityComparer<TKey>.Default;
         }
 

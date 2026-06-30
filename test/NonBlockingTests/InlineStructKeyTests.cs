@@ -58,6 +58,114 @@ namespace NonBlockingTests
         }
 
         [Fact]
+        public static void GuidKey_IntValue_BothInline_AllocationFree()
+        {
+            // struct key + atomic value: BOTH sides inline, so a fresh pre-sized dictionary fills
+            // with zero per-entry heap objects.
+            const int N = 20000;
+            var keys = new Guid[N];
+            for (int i = 0; i < N; i++) keys[i] = new Guid(i, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+
+            for (int w = 0; w < 8; w++)
+            {
+                var warm = new NB.ConcurrentDictionary<Guid, int>(1, N, null);
+                for (int i = 0; i < N; i++) warm.TryAdd(keys[i], i);
+            }
+
+            var d = new NB.ConcurrentDictionary<Guid, int>(1, N, null);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < N; i++) d.TryAdd(keys[i], i);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.True(allocated < N * 8, $"<Guid,int> both-inline insert of {N} allocated {allocated} bytes (expected < {N * 8}; boxing both sides would be ~{N * 56})");
+            Assert.Equal(N, d.Count);
+            for (int i = 0; i < N; i++) Assert.Equal(i, d[keys[i]]);
+            // update is steady-state allocation-free too
+            for (int w = 0; w < 8; w++) for (int i = 0; i < N; i++) d[keys[i]] = i + w;
+            long b2 = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < N; i++) d[keys[i]] = i + 1;
+            Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - b2);
+        }
+
+        [Fact]
+        public static void GuidKey_LongValue_BothInline_Correct()
+        {
+            // struct key + seqlock value
+            const int N = 50_000;
+            var d = new NB.ConcurrentDictionary<Guid, long>();
+            Guid G(int i) => new Guid(i, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            for (int i = 0; i < N; i++) Assert.True(d.TryAdd(G(i), (long)i << 33));
+            Assert.Equal(N, d.Count);
+            for (int i = 0; i < N; i++) Assert.Equal((long)i << 33, d[G(i)]);
+            for (int i = 0; i < N; i += 3) Assert.True(d.TryRemove(G(i), out _));
+            for (int i = 0; i < N; i++)
+            {
+                if (i % 3 == 0) Assert.False(d.ContainsKey(G(i)));
+                else Assert.Equal((long)i << 33, d[G(i)]);
+            }
+        }
+
+        [Fact]
+        public static void StructKey_StructValue_Combo_Concurrent_NoTornKeyOrValue()
+        {
+            // struct key (commit protocol) + struct value (seqlock) exercised together: writers race
+            // on a shared key set writing Pair{A=x,B=x^MAGIC}; readers verify both that the key maps
+            // correctly and that the value invariant A^B==MAGIC holds (no torn value, no torn key).
+            const int writerThreads = 6;
+            const int readerThreads = 4;
+            const int keyCount = 2000;
+            const int iters = 150_000;
+            const long MAGIC = unchecked((long)0xABCDEF0123456789);
+
+            var d = new NB.ConcurrentDictionary<Key24, Pair>();
+            Key24 K(int i) => new Key24 { A = i, B = -i, C = i };
+            for (int i = 0; i < keyCount; i++) d[K(i)] = new Pair { A = 0, B = 0 ^ MAGIC };
+
+            long torn = 0, stop = 0;
+            var readers = new Task[readerThreads];
+            for (int r = 0; r < readerThreads; r++)
+            {
+                readers[r] = Task.Run(() =>
+                {
+                    while (System.Threading.Volatile.Read(ref stop) == 0)
+                    {
+                        for (int i = 0; i < keyCount; i++)
+                        {
+                            if (d.TryGetValue(K(i), out var p) && (p.A ^ p.B) != MAGIC)
+                            {
+                                System.Threading.Interlocked.Increment(ref torn);
+                            }
+                        }
+                    }
+                });
+            }
+
+            Parallel.For(0, writerThreads, t =>
+            {
+                var rnd = new Random(t * 17 + 3);
+                for (int i = 0; i < iters; i++)
+                {
+                    int k = rnd.Next(keyCount);
+                    long x = ((long)t << 40) | (uint)i;
+                    d[K(k)] = new Pair { A = x, B = x ^ MAGIC };
+                }
+            });
+
+            System.Threading.Volatile.Write(ref stop, 1);
+            Task.WaitAll(readers);
+
+            Assert.Equal(0, System.Threading.Interlocked.Read(ref torn));
+            Assert.Equal(keyCount, d.Count);
+            for (int i = 0; i < keyCount; i++)
+            {
+                Assert.True(d.TryGetValue(K(i), out var p));
+                Assert.Equal(MAGIC, p.A ^ p.B);
+            }
+        }
+
+        private struct Pair { public long A; public long B; }
+
+        [Fact]
         public static void DefaultGuidKey_Works()
         {
             // default(Guid) == Guid.Empty: an all-zero key must be a normal entry (the commit flag,

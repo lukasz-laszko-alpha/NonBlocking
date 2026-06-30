@@ -63,19 +63,10 @@ namespace Alc.NonBlocking
         {
             internal int hash;
             internal TKey key;
-            // write-once commit state for the inline struct key: see KEY_* constants.
+            // write-once commit state for the inline struct key (see InlineStructKey).
             internal int keyState;
             internal object value;
         }
-
-        // The key is a value type stored inline in the entry, so a multi-word write is not atomic.
-        // Keys are write-once (a slot is never re-keyed), so a simple commit flag suffices - no
-        // version/seqlock. After the hash is claimed, exactly one writer transitions keyState
-        // KEY_UNCLAIMED -> KEY_WRITING, writes the key, then publishes KEY_COMMITTED (release).
-        // Readers/competing writers treat a non-committed slot as "not this key".
-        private const int KEY_UNCLAIMED = 0;
-        private const int KEY_WRITING = 1;
-        private const int KEY_COMMITTED = 2;
 
         private const int MIN_SIZE = 8;
 
@@ -94,71 +85,22 @@ namespace Alc.NonBlocking
         }
 
         // The hash for this slot is already claimed (== fullHash) when these run. They resolve the
-        // write-once inline key via keyState. 'entry' (not just the key field) is needed because the
-        // commit flag lives in a sibling field.
+        // write-once inline key via the shared InlineStructKey commit protocol.
 
-        // True if the (committed) key in this slot equals 'key'. A not-yet-committed slot is treated
-        // as a non-match for readers - the insert that owns it has not linearized yet.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool keyEqual(TKey key, ref Entry entry)
         {
-            if (Volatile.Read(ref entry.keyState) != KEY_COMMITTED)
-            {
-                return false;
-            }
-
-            return _keyComparer.Equals(key, entry.key);
+            return InlineStructKey.Equal(ref entry.keyState, ref entry.key, key, _keyComparer);
         }
 
-        // Claim this slot for 'key' (writing the key once) or report whether it already holds 'key'.
         private bool TryClaimSlotForPut(ref Entry entry, TKey key)
         {
-            int ks = Volatile.Read(ref entry.keyState);
-            if (ks == KEY_UNCLAIMED &&
-                Interlocked.CompareExchange(ref entry.keyState, KEY_WRITING, KEY_UNCLAIMED) == KEY_UNCLAIMED)
-            {
-                // we own the slot: write the key, then publish.
-                entry.key = key;
-                Volatile.Write(ref entry.keyState, KEY_COMMITTED);
-                this.allocatedSlotCount.Increment();
-                return true;
-            }
-
-            // another writer is mid-write (or just committed); wait for commit, then compare.
-            if (ks != KEY_COMMITTED)
-            {
-                var sw = new SpinWait();
-                while (Volatile.Read(ref entry.keyState) != KEY_COMMITTED)
-                {
-                    sw.SpinOnce();
-                }
-            }
-
-            return _keyComparer.Equals(key, entry.key);
+            return InlineStructKey.TryClaim(ref entry.keyState, ref entry.key, key, _keyComparer, this.allocatedSlotCount);
         }
 
         private bool TryClaimSlotForCopy(ref Entry entry, TKey key)
         {
-            int ks = Volatile.Read(ref entry.keyState);
-            if (ks == KEY_UNCLAIMED &&
-                Interlocked.CompareExchange(ref entry.keyState, KEY_WRITING, KEY_UNCLAIMED) == KEY_UNCLAIMED)
-            {
-                entry.key = key;
-                Volatile.Write(ref entry.keyState, KEY_COMMITTED);
-                this.allocatedSlotCount.Increment();
-                return true;
-            }
-
-            if (ks != KEY_COMMITTED)
-            {
-                var sw = new SpinWait();
-                while (Volatile.Read(ref entry.keyState) != KEY_COMMITTED)
-                {
-                    sw.SpinOnce();
-                }
-            }
-
-            return _keyComparer.Equals(key, entry.key);
+            return InlineStructKey.TryClaim(ref entry.keyState, ref entry.key, key, _keyComparer, this.allocatedSlotCount);
         }
 
         internal DictionaryImplStructKey(int capacity, ConcurrentDictionary<TKey, TValue> topDict)
