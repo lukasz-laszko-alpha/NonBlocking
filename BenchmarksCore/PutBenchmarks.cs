@@ -11,42 +11,44 @@ namespace NonBlockingTests
 {
     // Run with: dotnet run -c Release -- bdn --filter *PutBenchmarks*
     //
-    // The headline is the [MemoryDiagnoser] "Allocated" column, compared across four backings:
-    //   - Insert_SystemDictionary    : System.Collections.Generic.Dictionary (single-thread baseline,
-    //                                   not thread-safe; backing arrays only, no per-entry object)
-    //   - Insert_SystemConcurrent    : System.Collections.Concurrent.ConcurrentDictionary
-    //                                   (thread-safe peer; allocates a Node object per entry)
-    //   - Insert_NonBlocking_Boxed   : Alc.NonBlocking <int,long> - out-of-scope 64-bit value, so it
-    //                                   stays on the Boxed path and allocates a box per entry. This is
-    //                                   the in-library stand-in for "the value-type path before this change".
-    //   - Insert_NonBlocking_Inline  : Alc.NonBlocking <int,int> - the new inline path; only the Entry[]
-    //                                   backing arrays are allocated, ZERO per-entry heap object.
-    //
-    // Insert allocation = backing-array growth (all impls) + per-entry object (everyone except Inline).
-    // The Inline-vs-Boxed gap isolates the eliminated box; Update is steady-state and should be 0 B/op
-    // for Inline. ns/op shows the inline path is no slower than the boxed path it replaces.
+    // The headline is the [MemoryDiagnoser] "Allocated" / Gen2 columns. NonBlocking value-inline
+    // paths (Phase 1 atomic <int,int>, Phase 2 seqlock <int,long>) allocate only the Entry[]
+    // backing arrays - ZERO per-entry heap object - so gen2 pressure does not scale with element
+    // count. The Boxed row (<int, struct-with-reference>, which is not unmanaged so it keeps the
+    // box) and System.Collections.Concurrent (a Node per entry) show the per-entry-object cost
+    // this change eliminates.
     [MemoryDiagnoser]
     [MarkdownExporterAttribute.GitHub]
     [JsonExporterAttribute.FullCompressed]
     public class PutBenchmarks
     {
+        // value type with a managed reference -> NOT unmanaged -> stays on the Boxed path.
+        public struct Boxable
+        {
+            public long N;
+            public object Ref;
+        }
+
         [Params(1000, 100000)]
         public int Count;
 
-        private NB.ConcurrentDictionary<int, int> _nbInline;
-        private NB.ConcurrentDictionary<int, long> _nbBoxed;
+        private NB.ConcurrentDictionary<int, int> _nbAtomic;
+        private NB.ConcurrentDictionary<int, long> _nbSeqlock;
+        private NB.ConcurrentDictionary<int, Boxable> _nbBoxed;
         private SC.ConcurrentDictionary<int, int> _sysConcurrent;
 
         [GlobalSetup]
         public void Setup()
         {
-            _nbInline = new NB.ConcurrentDictionary<int, int>();
-            _nbBoxed = new NB.ConcurrentDictionary<int, long>();
+            _nbAtomic = new NB.ConcurrentDictionary<int, int>();
+            _nbSeqlock = new NB.ConcurrentDictionary<int, long>();
+            _nbBoxed = new NB.ConcurrentDictionary<int, Boxable>();
             _sysConcurrent = new SC.ConcurrentDictionary<int, int>();
             for (int i = 0; i < Count; i++)
             {
-                _nbInline.TryAdd(i, i);
-                _nbBoxed.TryAdd(i, i);
+                _nbAtomic.TryAdd(i, i);
+                _nbSeqlock.TryAdd(i, i);
+                _nbBoxed.TryAdd(i, new Boxable { N = i });
                 _sysConcurrent.TryAdd(i, i);
             }
         }
@@ -72,15 +74,23 @@ namespace NonBlockingTests
         [Benchmark]
         public object Insert_NonBlocking_Boxed()
         {
-            var d = new NB.ConcurrentDictionary<int, long>();
+            var d = new NB.ConcurrentDictionary<int, Boxable>();
+            for (int i = 0; i < Count; i++) d.TryAdd(i, new Boxable { N = i });
+            return d;
+        }
+
+        [Benchmark]
+        public object Insert_NonBlocking_Atomic()   // Phase 1: <int,int> inline encoded slot
+        {
+            var d = new NB.ConcurrentDictionary<int, int>();
             for (int i = 0; i < Count; i++) d.TryAdd(i, i);
             return d;
         }
 
         [Benchmark]
-        public object Insert_NonBlocking_Inline()
+        public object Insert_NonBlocking_Seqlock()   // Phase 2: <int,long> inline seqlock slot
         {
-            var d = new NB.ConcurrentDictionary<int, int>();
+            var d = new NB.ConcurrentDictionary<int, long>();
             for (int i = 0; i < Count; i++) d.TryAdd(i, i);
             return d;
         }
@@ -88,24 +98,48 @@ namespace NonBlockingTests
         // ---- Update: overwrite existing keys (steady state, no resize) ----
 
         [Benchmark]
-        public void Update_SystemConcurrent()
+        public void Update_NonBlocking_Atomic()
         {
-            for (int i = 0; i < Count; i++) _sysConcurrent[i] = i + 1;
+            for (int i = 0; i < Count; i++) _nbAtomic[i] = i + 1;
+        }
+
+        [Benchmark]
+        public void Update_NonBlocking_Seqlock()
+        {
+            for (int i = 0; i < Count; i++) _nbSeqlock[i] = i + 1;
         }
 
         [Benchmark]
         public void Update_NonBlocking_Boxed()
         {
-            for (int i = 0; i < Count; i++) _nbBoxed[i] = i + 1;
-        }
-
-        [Benchmark]
-        public void Update_NonBlocking_Inline()
-        {
-            for (int i = 0; i < Count; i++) _nbInline[i] = i + 1;
+            for (int i = 0; i < Count; i++) _nbBoxed[i] = new Boxable { N = i + 1 };
         }
 
         // ---- Lookup (all hits) ----
+
+        [Benchmark]
+        public long Lookup_NonBlocking_Atomic()
+        {
+            long s = 0;
+            for (int i = 0; i < Count; i++)
+            {
+                _nbAtomic.TryGetValue(i, out var v);
+                s += v;
+            }
+            return s;
+        }
+
+        [Benchmark]
+        public long Lookup_NonBlocking_Seqlock()
+        {
+            long s = 0;
+            for (int i = 0; i < Count; i++)
+            {
+                _nbSeqlock.TryGetValue(i, out var v);
+                s += v;
+            }
+            return s;
+        }
 
         [Benchmark]
         public long Lookup_SystemConcurrent()
@@ -114,18 +148,6 @@ namespace NonBlockingTests
             for (int i = 0; i < Count; i++)
             {
                 _sysConcurrent.TryGetValue(i, out var v);
-                s += v;
-            }
-            return s;
-        }
-
-        [Benchmark]
-        public long Lookup_NonBlocking_Inline()
-        {
-            long s = 0;
-            for (int i = 0; i < Count; i++)
-            {
-                _nbInline.TryGetValue(i, out var v);
                 s += v;
             }
             return s;

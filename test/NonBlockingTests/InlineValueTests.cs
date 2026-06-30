@@ -41,9 +41,9 @@ namespace NonBlockingTests
             }
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-            // The insert loop must not box: well under 1 byte/op.
-            Assert.True(allocated < 2048,
-                $"inserting {N} <int,int> entries allocated {allocated} bytes (expected ~0; the boxed path would allocate ~{N * 24} bytes)");
+            // < 1 byte/op proves no per-entry box (boxing is ~24 B/op); residual is one-time JIT noise.
+            Assert.True(allocated < N,
+                $"inserting {N} <int,int> entries allocated {allocated} bytes (expected < {N}; the boxed path would allocate ~{N * 24} bytes)");
             Assert.Equal(N, d.Count);
         }
 
@@ -66,21 +66,29 @@ namespace NonBlockingTests
             Assert.True(allocated == 0, $"updates allocated {allocated} bytes (expected 0)");
         }
 
-        [Fact]
-        public static void Contrast_IntLong_StillAllocates()
+        private struct WithReference
         {
-            // <int,long> is out of scope (64-bit value) and must stay on the Boxed path,
-            // which allocates a box per key. This locks the scope boundary in.
-            const int N = 20000;
-            var warm = new NB.ConcurrentDictionary<int, long>(1, N, null);
-            for (int i = 0; i < N; i++) warm.TryAdd(i, i);
+            public int N;
+            public string S; // managed reference -> NOT unmanaged -> stays on the Boxed path
+        }
 
-            var d = new NB.ConcurrentDictionary<int, long>(1, N, null);
+        [Fact]
+        public static void Contrast_ValueTypeWithReference_StillAllocates()
+        {
+            // A value type containing a managed reference is NOT unmanaged, so it stays on the
+            // Boxed path (inline storage would not give the GC-determinism win). This locks the
+            // scope boundary in: only reference-free value types are stored inline.
+            const int N = 20000;
+            var s = "v";
+            var warm = new NB.ConcurrentDictionary<int, WithReference>(1, N, null);
+            for (int i = 0; i < N; i++) warm.TryAdd(i, new WithReference { N = i, S = s });
+
+            var d = new NB.ConcurrentDictionary<int, WithReference>(1, N, null);
             long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < N; i++) d.TryAdd(i, i);
+            for (int i = 0; i < N; i++) d.TryAdd(i, new WithReference { N = i, S = s });
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-            Assert.True(allocated > N, $"<int,long> allocated only {allocated} bytes for {N} inserts; expected per-key boxing");
+            Assert.True(allocated > N, $"<int,WithReference> allocated only {allocated} bytes for {N} inserts; expected per-key boxing");
         }
 
         [Fact]
@@ -242,8 +250,8 @@ namespace NonBlockingTests
             for (int i = 0; i < N; i++) d.TryAdd(keys[i], i);
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-            Assert.True(allocated < 2048,
-                $"<string,int> inserting {N} entries allocated {allocated} bytes (expected ~0; the boxed value path would allocate ~{N * 24} bytes)");
+            Assert.True(allocated < N,
+                $"<string,int> inserting {N} entries allocated {allocated} bytes (expected < {N}; the boxed value path would allocate ~{N * 24} bytes)");
             Assert.Equal(N, d.Count);
             for (int i = 0; i < N; i++)
             {

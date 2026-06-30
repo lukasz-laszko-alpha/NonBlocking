@@ -65,6 +65,30 @@ namespace Alc.NonBlocking
                    typeof(TValue) == typeof(float);
         }
 
+        // True when TValue is an unmanaged struct (no embedded managed references) that is NOT
+        // already handled by the Phase 1 <=32-bit encoded slot. Such values are stored inline in
+        // the Entry, guarded by a per-entry seqlock (DictionaryImplValSeqlock), so the dictionary
+        // holds no per-entry heap object - the deterministic-GC goal. Value types containing
+        // references keep the Boxed path (the GC must trace those references regardless, so inline
+        // storage would not give the determinism win and adds write-barrier cost on the hot path).
+        // On netstandard2.0 RuntimeHelpers.IsReferenceOrContainsReferences is unavailable, so the
+        // optimization is skipped there (correct boxed fallback).
+        private static readonly bool s_valueIsInlineableStruct = ComputeValueIsInlineableStruct();
+
+        private static bool ComputeValueIsInlineableStruct()
+        {
+            if (default(TValue) == null || s_valueIsAtomic32)
+            {
+                return false;
+            }
+
+#if NETSTANDARD2_1_OR_GREATER || NET
+            return !System.Runtime.CompilerServices.RuntimeHelpers.IsReferenceOrContainsReferences<TValue>();
+#else
+            return false;
+#endif
+        }
+
         /// <summary>The default capacity, i.e. the initial # of buckets.</summary>
         /// <remarks>
         /// When choosing this value, we are making a trade-off between the size of a very small dictionary,
@@ -209,17 +233,24 @@ namespace Alc.NonBlocking
             {
                 if (typeof(TKey) == typeof(int) || (typeof(TKey) == typeof(uint) && comparer == null))
                 {
+                    var intTop = Unsafe.As<ConcurrentDictionary<int, TValue>>(this);
                     if (comparer == null)
                     {
-                        _table = s_valueIsAtomic32
-                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntValAtomicNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<int, TValue>>(this)))
-                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntNoComparer<TValue>(capacity, Unsafe.As<ConcurrentDictionary<int, TValue>>(this)));
+                        if (s_valueIsAtomic32)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntValAtomicNoComparer<TValue>(capacity, intTop));
+                        else if (s_valueIsInlineableStruct)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntValSeqlockNoComparer<TValue>(capacity, intTop));
+                        else
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntNoComparer<TValue>(capacity, intTop));
                     }
                     else
                     {
-                        _table = s_valueIsAtomic32
-                            ? Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntValAtomic<TValue>(capacity, Unsafe.As<ConcurrentDictionary<int, TValue>>(this)))
-                            : Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplInt<TValue>(capacity, Unsafe.As<ConcurrentDictionary<int, TValue>>(this)));
+                        if (s_valueIsAtomic32)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntValAtomic<TValue>(capacity, intTop));
+                        else if (s_valueIsInlineableStruct)
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplIntValSeqlock<TValue>(capacity, intTop));
+                        else
+                            _table = Unsafe.As<DictionaryImpl<TKey, TValue>>(new DictionaryImplInt<TValue>(capacity, intTop));
                         _table._keyComparer = comparer;
                     }
                     return;
