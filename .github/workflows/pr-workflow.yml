@@ -22,11 +22,11 @@ jobs:
     steps:
       - name: Setup
         id: setup
-        # Versioning scheme mirrors alc-nexus: 1.<YYYY.M>.<run_number>-pr-<pr_number>-<short_sha>
+        # Versioning scheme mirrors alc-nexus: 3.<YYYY.M>.<run_number>-pr-<pr_number>-<short_sha>
         run: |
           DATE=$(date +'%Y.%-m')
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "version=1.${DATE}.${{ github.run_number }}-pr-${{ github.event.number }}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "version=3.${DATE}.${{ github.run_number }}-pr-${{ github.event.number }}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: init

@@ -5,6 +5,7 @@
 #nullable disable
 
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace Alc.NonBlocking
 {
@@ -40,18 +41,18 @@ namespace Alc.NonBlocking
             var entries = this._entries;
             while (idx < entries.Length)
             {
-                var nextEntry = entries[idx++];
+                ref var nextEntry = ref entries[idx++];
 
                 if (nextEntry.value != null)
                 {
-                    var nextKstore = nextEntry.key;
-                    if (nextKstore == null)
+                    // acquire: never read inline key bits before the write-once commit is
+                    // visible (a concurrent first insert may still be writing the key).
+                    if (Volatile.Read(ref nextEntry.keyState) != InlineStructKey.KEY_COMMITTED)
                     {
-                        // slot was deleted.
                         continue;
                     }
 
-                    var curKey = keyFromEntry(nextKstore);
+                    var curKey = keyFromEntry(nextEntry.key);
                     object nextV = TryGetValue(curKey);
                     if (nextV != null)
                     {

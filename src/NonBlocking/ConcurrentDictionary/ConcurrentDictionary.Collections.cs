@@ -36,23 +36,33 @@ namespace Alc.NonBlocking
                 _dict = dict;
             }
 
-            /// <summary>Gets the number of keys, as of the moment of access.</summary>
+            /// <summary>
+            /// Gets the number of keys, as of the moment of access.
+            /// </summary>
             public int Count => _dict.Count;
 
-            /// <summary>Always true. The collection is a read-only view.</summary>
+            /// <summary>
+            /// Always true. The collection is a read-only view.
+            /// </summary>
             public bool IsReadOnly => true;
 
-            /// <summary>Returns an allocation-free struct enumerator over the keys.</summary>
+            /// <summary>
+            /// Returns an allocation-free struct enumerator over the keys.
+            /// </summary>
             public Enumerator GetEnumerator() => new Enumerator(_dict.GetEnumerator());
 
             IEnumerator<TKey> IEnumerable<TKey>.GetEnumerator() => GetEnumerator();
 
             IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-            /// <summary>Determines whether the dictionary contains the specified key.</summary>
+            /// <summary>
+            /// Determines whether the dictionary contains the specified key.
+            /// </summary>
             public bool Contains(TKey item) => _dict.ContainsKey(item);
 
-            /// <summary>Copies the keys to <paramref name="array"/> starting at <paramref name="arrayIndex"/>.</summary>
+            /// <summary>
+            /// Copies the keys to <paramref name="array"/> starting at <paramref name="arrayIndex"/>.
+            /// </summary>
             public void CopyTo(TKey[] array, int arrayIndex)
             {
                 if (array is null)
@@ -135,7 +145,9 @@ namespace Alc.NonBlocking
             bool ICollection.IsSynchronized => false;
             object ICollection.SyncRoot => throw new NotSupportedException("SyncRoot not supported");
 
-            /// <summary>An allocation-free enumerator over the keys.</summary>
+            /// <summary>
+            /// An allocation-free enumerator over the keys.
+            /// </summary>
             public struct Enumerator : IEnumerator<TKey>
             {
                 private ConcurrentDictionary<TKey, TValue>.Enumerator _inner;
@@ -145,18 +157,26 @@ namespace Alc.NonBlocking
                     _inner = inner;
                 }
 
-                /// <summary>Gets the key at the current position of the enumerator.</summary>
+                /// <summary>
+                /// Gets the key at the current position of the enumerator.
+                /// </summary>
                 public TKey Current => _inner.Current.Key;
 
                 object IEnumerator.Current => _inner.Current.Key;
 
-                /// <summary>Advances the enumerator to the next key.</summary>
+                /// <summary>
+                /// Advances the enumerator to the next key.
+                /// </summary>
                 public bool MoveNext() => _inner.MoveNext();
 
-                /// <summary>Sets the enumerator to its initial position.</summary>
+                /// <summary>
+                /// Sets the enumerator to its initial position.
+                /// </summary>
                 public void Reset() => _inner.Reset();
 
-                /// <summary>Releases resources used by the enumerator.</summary>
+                /// <summary>
+                /// Releases resources used by the enumerator.
+                /// </summary>
                 public void Dispose() { }
             }
         }
@@ -179,20 +199,28 @@ namespace Alc.NonBlocking
                 _dict = dict;
             }
 
-            /// <summary>Gets the number of values, as of the moment of access.</summary>
+            /// <summary>
+            /// Gets the number of values, as of the moment of access.
+            /// </summary>
             public int Count => _dict.Count;
 
-            /// <summary>Always true. The collection is a read-only view.</summary>
+            /// <summary>
+            /// Always true. The collection is a read-only view.
+            /// </summary>
             public bool IsReadOnly => true;
 
-            /// <summary>Returns an allocation-free struct enumerator over the values.</summary>
+            /// <summary>
+            /// Returns an allocation-free struct enumerator over the values.
+            /// </summary>
             public Enumerator GetEnumerator() => new Enumerator(_dict.GetEnumerator());
 
             IEnumerator<TValue> IEnumerable<TValue>.GetEnumerator() => GetEnumerator();
 
             IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-            /// <summary>Determines whether the dictionary contains the specified value (linear scan).</summary>
+            /// <summary>
+            /// Determines whether the dictionary contains the specified value (linear scan).
+            /// </summary>
             public bool Contains(TValue item)
             {
                 var comparer = EqualityComparer<TValue>.Default;
@@ -207,7 +235,9 @@ namespace Alc.NonBlocking
                 return false;
             }
 
-            /// <summary>Copies the values to <paramref name="array"/> starting at <paramref name="arrayIndex"/>.</summary>
+            /// <summary>
+            /// Copies the values to <paramref name="array"/> starting at <paramref name="arrayIndex"/>.
+            /// </summary>
             public void CopyTo(TValue[] array, int arrayIndex)
             {
                 if (array is null)
@@ -290,7 +320,9 @@ namespace Alc.NonBlocking
             bool ICollection.IsSynchronized => false;
             object ICollection.SyncRoot => throw new NotSupportedException("SyncRoot not supported");
 
-            /// <summary>An allocation-free enumerator over the values.</summary>
+            /// <summary>
+            /// An allocation-free enumerator over the values.
+            /// </summary>
             public struct Enumerator : IEnumerator<TValue>
             {
                 private ConcurrentDictionary<TKey, TValue>.Enumerator _inner;
@@ -300,18 +332,26 @@ namespace Alc.NonBlocking
                     _inner = inner;
                 }
 
-                /// <summary>Gets the value at the current position of the enumerator.</summary>
+                /// <summary>
+                /// Gets the value at the current position of the enumerator.
+                /// </summary>
                 public TValue Current => _inner.Current.Value;
 
                 object IEnumerator.Current => _inner.Current.Value;
 
-                /// <summary>Advances the enumerator to the next value.</summary>
+                /// <summary>
+                /// Advances the enumerator to the next value.
+                /// </summary>
                 public bool MoveNext() => _inner.MoveNext();
 
-                /// <summary>Sets the enumerator to its initial position.</summary>
+                /// <summary>
+                /// Sets the enumerator to its initial position.
+                /// </summary>
                 public void Reset() => _inner.Reset();
 
-                /// <summary>Releases resources used by the enumerator.</summary>
+                /// <summary>
+                /// Releases resources used by the enumerator.
+                /// </summary>
                 public void Dispose() { }
             }
         }

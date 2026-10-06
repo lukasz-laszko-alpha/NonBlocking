@@ -9,7 +9,13 @@
     <RootNamespace>Alc.NonBlocking</RootNamespace>
 
     <PackageId>Alc.NonBlocking</PackageId>
-    <PackageVersion>2.2.0</PackageVersion>
+    <!-- CI overrides this with -p:PackageVersion=3.<YYYY.M>.<run>[-suffix] (see main/pr workflows).
+         Major 3.x: the upstream package history is 2.x, and the rename to Alc.NonBlocking plus the
+         inline-storage work is a binary-incompatible break; NuGet sorts any lower major below the
+         published 2.x line, so local dev builds use 3.0.0 to stay in-range but below CI builds. -->
+    <PackageVersion>3.0.0</PackageVersion>
+    <RepositoryUrl>https://github.com/alphalab-hq/NonBlocking</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <Authors>Vladimir Sadov</Authors>
     <Description>
       Implementation of a lock-free dictionary on .Net

@@ -53,6 +53,10 @@ namespace Alc.NonBlocking
                 Interlocked.CompareExchange(ref keyState, KEY_WRITING, KEY_UNCLAIMED) == KEY_UNCLAIMED)
             {
                 // we own the slot: write the key, then publish (release).
+                // INVARIANT: nothing between the winning CAS above and the COMMITTED store below
+                // may throw - a struct copy and a release store cannot fail, so a slot can never be
+                // stranded in KEY_WRITING (readers treat it as "not this key"; competing writers
+                // spin on it). Do not hoist any user code (e.g. the comparer) into this window.
                 keyField = key;
                 Volatile.Write(ref keyState, KEY_COMMITTED);
                 slotCount.Increment();

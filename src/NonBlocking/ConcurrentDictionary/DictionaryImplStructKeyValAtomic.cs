@@ -33,15 +33,18 @@
 //
 // 32-bit atomicity: plain `long` loads/stores are not atomic on 32-bit (ECMA-335
 // 12.6.6), and this library targets netstandard2.0. Therefore EVERY slot access uses
-// Interlocked (Read / CompareExchange / Exchange) - never Volatile.Read(ref long).
-// Do not "optimize" a slot read back to Volatile.Read: it silently breaks 32-bit.
+// Volatile.Read(ref long) or Interlocked (CompareExchange / Exchange) - never a plain
+// or C#-volatile read. Volatile.Read(ref long) is safe here: the BCL implements it as
+// Interlocked.CompareExchange on 32-bit (atomic) and as a plain acquire load on 64-bit,
+// so hot readers do not take exclusive ownership of the slot's cache line the way an
+// Interlocked.Read (always an RMW) would. Do not "optimize" a slot read to an ordinary
+// load: it silently breaks 32-bit.
 
 #nullable disable
 
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -151,15 +154,12 @@ namespace Alc.NonBlocking
             this._size = new Counter32();
             this._topDict = topDict;
 
-#if NETSTANDARD2_1_OR_GREATER || NET
-            if (RuntimeHelpers.IsReferenceOrContainsReferences<TKey>())
-#else
-            if (!typeof(TKey).IsValueType)
-#endif
-            {
-                // do not create a real sweeper just yet. Often it is not needed.
-                topDict._sweeperInstance = NULLVALUE;
-            }
+            // The tombstone sweeper is deliberately NOT armed for inline struct keys, even when
+            // TKey contains references. The sweeper re-keys swept slots (entry.key = default),
+            // which would violate the write-once commit protocol (InlineStructKey): committed key
+            // bits must never change, or concurrent comparer reads tear and enumeration can
+            // observe phantom default(TKey) entries. Removed entries (and the references their
+            // keys hold) are reclaimed when the table resizes, exactly like blittable-key tables.
         }
 
         private DictionaryImplStructKeyValAtomic(int capacity, DictionaryImplStructKeyValAtomic<TKey, TValue> other)
@@ -228,7 +228,7 @@ namespace Alc.NonBlocking
                 if (fullHash == entry.hash && keyEqual(key, ref entry))
                 {
                     // read the value before reading _newTable (acquire, 32-bit-safe).
-                    long entryState = Interlocked.Read(ref entry.state);
+                    long entryState = Volatile.Read(ref entry.state);
                     if (StateNullOrDead(entryState))
                     {
                         break;
@@ -326,7 +326,7 @@ namespace Alc.NonBlocking
                 entry = ref curTable._entries[idx];
             }
 
-            long entryState = Interlocked.Read(ref entry.state);
+            long entryState = Volatile.Read(ref entry.state);
             var newTable = curTable._newTable;
 
             if (newTable != null || entryState == TAG_TOMBPRIME)
@@ -441,7 +441,7 @@ namespace Alc.NonBlocking
             }
 
             // Found the proper Key slot, now update the Value.
-            long entryState = Interlocked.Read(ref entry.state);
+            long entryState = Volatile.Read(ref entry.state);
 
             var newTable = curTable._newTable;
 
@@ -576,7 +576,7 @@ namespace Alc.NonBlocking
                 entry = ref curTable._entries[idx];
             }
 
-            long entryState = Interlocked.Read(ref entry.state);
+            long entryState = Volatile.Read(ref entry.state);
 
             var newTable = curTable._newTable;
 
@@ -690,7 +690,7 @@ namespace Alc.NonBlocking
                 entry = ref curTable._entries[idx];
             }
 
-            long entryState = Interlocked.Read(ref entry.state);
+            long entryState = Volatile.Read(ref entry.state);
 
             var newTable = curTable._newTable;
 
@@ -859,14 +859,16 @@ namespace Alc.NonBlocking
         {
             var newTable = this._newTable;
 
-            Debug.Assert(IsPrime(Interlocked.Read(ref entry.state)) || newTable != null);
+            Debug.Assert(IsPrime(Volatile.Read(ref entry.state)) || newTable != null);
 
             if (newTable == null)
             {
-                Debug.Assert(!typeof(TKey).GetTypeInfo().IsValueType);
-                // help with sweeping in case the sweeper thread is stuck.
+                // Unreachable: TOMBPRIME appears only during a resize copy (the sweeper is never
+                // armed for inline struct keys; see the constructor). Kept as a defensive escape:
+                // dead-mark the hash so probes skip the slot, but NEVER touch the key bits - the
+                // write-once protocol (InlineStructKey) requires a committed key to stay immutable.
+                Debug.Fail("TOMBPRIME observed without a new table; inline struct keys are never swept.");
                 entry.hash = SPECIAL_HASH_BITS;
-                entry.key = default(TKey);
 
                 return this;
             }
@@ -912,15 +914,15 @@ namespace Alc.NonBlocking
             }
 
             // NOTE: the read of the value below must happen-before the read of the key.
-            // Interlocked.Read is an acquire load (and 32-bit atomic), and the priming CAS
+            // Volatile.Read is an acquire load (and 32-bit atomic), and the priming CAS
             // below is a full fence, so the later key read is correctly ordered. This is the
             // analog of DictionaryImpl`3.CopySlot's Volatile.Read(ref box.originalValue).
-            long oldState = Interlocked.Read(ref oldEntry.state);
+            long oldState = Volatile.Read(ref oldEntry.state);
 
             if (IsPrime(oldState))
             {
                 // already primed by someone else; re-read as an acquire fence before the key read.
-                oldState = Interlocked.Read(ref oldEntry.state);
+                oldState = Volatile.Read(ref oldEntry.state);
             }
             else
             {
@@ -966,7 +968,7 @@ namespace Alc.NonBlocking
             bool copiedIntoNew = newTable.PutSlotCopy(key, valueState, hash);
 
             // Now hide the old value with TOMBPRIME to stop other threads re-copying.
-            if (Interlocked.Read(ref oldEntry.state) != TAG_TOMBPRIME)
+            if (Volatile.Read(ref oldEntry.state) != TAG_TOMBPRIME)
             {
                 Interlocked.Exchange(ref oldEntry.state, TAG_TOMBPRIME);
             }
@@ -1114,7 +1116,7 @@ namespace Alc.NonBlocking
                     }
 
                     ref var e = ref entries[i];
-                    if (Interlocked.Read(ref e.state) == TAG_TOMBSTONE)
+                    if (Volatile.Read(ref e.state) == TAG_TOMBSTONE)
                     {
                         if (Interlocked.CompareExchange(ref e.state, TAG_TOMBPRIME, TAG_TOMBSTONE) == TAG_TOMBSTONE)
                         {
@@ -1161,16 +1163,16 @@ namespace Alc.NonBlocking
             {
                 ref var nextEntry = ref entries[idx++];
 
-                if (!IsEmpty(Interlocked.Read(ref nextEntry.state)))
+                if (!IsEmpty(Volatile.Read(ref nextEntry.state)))
                 {
-                    var nextKstore = nextEntry.key;
-                    if (nextKstore == null)
+                    // acquire: never read inline key bits before the write-once commit is
+                    // visible (a concurrent first insert may still be writing the key).
+                    if (Volatile.Read(ref nextEntry.keyState) != InlineStructKey.KEY_COMMITTED)
                     {
-                        // ref-key slot was deleted (compile-time false for value keystores)
                         continue;
                     }
 
-                    var curKey = keyFromEntry(nextKstore);
+                    var curKey = keyFromEntry(nextEntry.key);
                     if (TryGetValueUnboxed(curKey, out var curValue))
                     {
                         key = curKey;

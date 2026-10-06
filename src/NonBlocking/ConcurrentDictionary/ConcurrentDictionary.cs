@@ -109,14 +109,18 @@ namespace Alc.NonBlocking
 #endif
         }
 
-        /// <summary>The default capacity, i.e. the initial # of buckets.</summary>
+        /// <summary>
+        /// The default capacity, i.e. the initial # of buckets.
+        /// </summary>
         /// <remarks>
         /// When choosing this value, we are making a trade-off between the size of a very small dictionary,
         /// and the number of resizes when constructing a large dictionary.
         /// </remarks>
         private const int DefaultCapacity = 0;
 
-        /// <summary>Concurrency level is ignored. However it must be > 0.</summary>
+        /// <summary>
+        /// Concurrency level is ignored. However it must be > 0.
+        /// </summary>
         private static int DefaultConcurrencyLevel => 1;
 
         /// <summary>
@@ -409,7 +413,9 @@ namespace Alc.NonBlocking
             return _table.RemoveIfMatch(key, ref value, ValueMatch.NotNullOrDead);
         }
 
-        /// <summary>Removes a key and value from the dictionary.</summary>
+        /// <summary>
+        /// Removes a key and value from the dictionary.
+        /// </summary>
         /// <param name="item">The <see cref="KeyValuePair{TKey,TValue}"/> representing the key and value to remove.</param>
         /// <returns>
         /// true if the key and value represented by <paramref name="item"/> are successfully
@@ -583,7 +589,9 @@ namespace Alc.NonBlocking
             return array;
         }
 
-        /// <summary>Copy dictionary contents to an array.</summary>
+        /// <summary>
+        /// Copy dictionary contents to an array.
+        /// </summary>
         private void CopyToPairs(KeyValuePair<TKey, TValue>[] array, int index)
         {
             if (array is null)
@@ -615,7 +623,9 @@ namespace Alc.NonBlocking
             }
         }
 
-        /// <summary>Copy dictionary contents to an array.</summary>
+        /// <summary>
+        /// Copy dictionary contents to an array.
+        /// </summary>
         private void CopyToEntries(DictionaryEntry[] array, int index)
         {
             if (array is null)
@@ -629,7 +639,7 @@ namespace Alc.NonBlocking
             }
 
             var length = array.Length;
-            if (index >= length)
+            if (index > length)
             {
                 throw new ArgumentException("array is too short");
             }
@@ -647,7 +657,9 @@ namespace Alc.NonBlocking
             }
         }
 
-        /// <summary>Copy dictionary contents to an array.</summary>
+        /// <summary>
+        /// Copy dictionary contents to an array.
+        /// </summary>
         private void CopyToObjects(object[] array, int index)
         {
             if (array is null)
@@ -701,7 +713,9 @@ namespace Alc.NonBlocking
         /// </remarks>
         IEnumerator<KeyValuePair<TKey, TValue>> IEnumerable<KeyValuePair<TKey, TValue>>.GetEnumerator() => GetEnumerator();
 
-        /// <summary>Gets or sets the value associated with the specified key.</summary>
+        /// <summary>
+        /// Gets or sets the value associated with the specified key.
+        /// </summary>
         /// <param name="key">The key of the value to get or set.</param>
         /// <value>
         /// The value associated with the specified key. If the specified key is not found, a get operation throws a
@@ -738,7 +752,9 @@ namespace Alc.NonBlocking
             }
         }
 
-        /// <summary>Throws a KeyNotFoundException.</summary>
+        /// <summary>
+        /// Throws a KeyNotFoundException.
+        /// </summary>
         /// <remarks>Separate from ThrowHelper to avoid boxing at call site while reusing this generic instantiation.</remarks>
 #if NETSTANDARD2_1_OR_GREATER || NET
         [DoesNotReturn]
@@ -1100,7 +1116,7 @@ namespace Alc.NonBlocking
         /// </summary>
         /// <value>An <see cref="ICollection{TKey}"/> containing the keys in the
         /// <see cref="Dictionary{TKey,TValue}"/>.</value>
-        public KeyCollection Keys => _keys ?? Interlocked.CompareExchange(ref _keys, new KeyCollection(this), null) ?? _keys;
+        public KeyCollection Keys => Volatile.Read(ref _keys) ?? Interlocked.CompareExchange(ref _keys, new KeyCollection(this), null) ?? _keys;
 
         ICollection<TKey> IDictionary<TKey, TValue>.Keys => Keys;
 
@@ -1119,7 +1135,7 @@ namespace Alc.NonBlocking
         /// <value>An <see cref="ICollection{TValue}"/> containing the values in
         /// the
         /// <see cref="Dictionary{TKey,TValue}"/>.</value>
-        public ValueCollection Values => _values ?? Interlocked.CompareExchange(ref _values, new ValueCollection(this), null) ?? _values;
+        public ValueCollection Values => Volatile.Read(ref _values) ?? Interlocked.CompareExchange(ref _values, new ValueCollection(this), null) ?? _values;
 
         ICollection<TValue> IDictionary<TKey, TValue>.Values => Values;
 
@@ -1494,15 +1510,21 @@ namespace Alc.NonBlocking
                 _curValue = default;
             }
 
-            /// <summary>Gets the element at the current position of the enumerator.</summary>
+            /// <summary>
+            /// Gets the element at the current position of the enumerator.
+            /// </summary>
             public KeyValuePair<TKey, TValue> Current => new KeyValuePair<TKey, TValue>(_curKey, _curValue);
 
             object IEnumerator.Current => new KeyValuePair<TKey, TValue>(_curKey, _curValue);
 
-            /// <summary>Advances the enumerator to the next element.</summary>
+            /// <summary>
+            /// Advances the enumerator to the next element.
+            /// </summary>
             public bool MoveNext() => _table.MoveNextSnapshot(ref _idx, out _curKey, out _curValue);
 
-            /// <summary>Sets the enumerator to its initial position.</summary>
+            /// <summary>
+            /// Sets the enumerator to its initial position.
+            /// </summary>
             public void Reset()
             {
                 _idx = 0;
@@ -1510,7 +1532,9 @@ namespace Alc.NonBlocking
                 _curValue = default;
             }
 
-            /// <summary>Releases resources used by the enumerator.</summary>
+            /// <summary>
+            /// Releases resources used by the enumerator.
+            /// </summary>
             public void Dispose() { }
         }
 

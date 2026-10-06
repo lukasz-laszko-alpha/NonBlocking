@@ -33,8 +33,12 @@
 //
 // 32-bit atomicity: plain `long` loads/stores are not atomic on 32-bit (ECMA-335
 // 12.6.6), and this library targets netstandard2.0. Therefore EVERY slot access uses
-// Interlocked (Read / CompareExchange / Exchange) - never Volatile.Read(ref long).
-// Do not "optimize" a slot read back to Volatile.Read: it silently breaks 32-bit.
+// Volatile.Read(ref long) or Interlocked (CompareExchange / Exchange) - never a plain
+// or C#-volatile read. Volatile.Read(ref long) is safe here: the BCL implements it as
+// Interlocked.CompareExchange on 32-bit (atomic) and as a plain acquire load on 64-bit,
+// so hot readers do not take exclusive ownership of the slot's cache line the way an
+// Interlocked.Read (always an RMW) would. Do not "optimize" a slot read to an ordinary
+// load: it silently breaks 32-bit.
 
 #nullable disable
 
@@ -212,7 +216,7 @@ namespace Alc.NonBlocking
                 if (fullHash == entry.hash && keyEqual(key, entry.key))
                 {
                     // read the value before reading _newTable (acquire, 32-bit-safe).
-                    long entryState = Interlocked.Read(ref entry.state);
+                    long entryState = Volatile.Read(ref entry.state);
                     if (StateNullOrDead(entryState))
                     {
                         break;
@@ -310,7 +314,7 @@ namespace Alc.NonBlocking
                 entry = ref curTable._entries[idx];
             }
 
-            long entryState = Interlocked.Read(ref entry.state);
+            long entryState = Volatile.Read(ref entry.state);
             var newTable = curTable._newTable;
 
             if (newTable != null || entryState == TAG_TOMBPRIME)
@@ -425,7 +429,7 @@ namespace Alc.NonBlocking
             }
 
             // Found the proper Key slot, now update the Value.
-            long entryState = Interlocked.Read(ref entry.state);
+            long entryState = Volatile.Read(ref entry.state);
 
             var newTable = curTable._newTable;
 
@@ -560,7 +564,7 @@ namespace Alc.NonBlocking
                 entry = ref curTable._entries[idx];
             }
 
-            long entryState = Interlocked.Read(ref entry.state);
+            long entryState = Volatile.Read(ref entry.state);
 
             var newTable = curTable._newTable;
 
@@ -674,7 +678,7 @@ namespace Alc.NonBlocking
                 entry = ref curTable._entries[idx];
             }
 
-            long entryState = Interlocked.Read(ref entry.state);
+            long entryState = Volatile.Read(ref entry.state);
 
             var newTable = curTable._newTable;
 
@@ -843,7 +847,7 @@ namespace Alc.NonBlocking
         {
             var newTable = this._newTable;
 
-            Debug.Assert(IsPrime(Interlocked.Read(ref entry.state)) || newTable != null);
+            Debug.Assert(IsPrime(Volatile.Read(ref entry.state)) || newTable != null);
 
             if (newTable == null)
             {
@@ -896,15 +900,15 @@ namespace Alc.NonBlocking
             }
 
             // NOTE: the read of the value below must happen-before the read of the key.
-            // Interlocked.Read is an acquire load (and 32-bit atomic), and the priming CAS
+            // Volatile.Read is an acquire load (and 32-bit atomic), and the priming CAS
             // below is a full fence, so the later key read is correctly ordered. This is the
             // analog of DictionaryImpl`3.CopySlot's Volatile.Read(ref box.originalValue).
-            long oldState = Interlocked.Read(ref oldEntry.state);
+            long oldState = Volatile.Read(ref oldEntry.state);
 
             if (IsPrime(oldState))
             {
                 // already primed by someone else; re-read as an acquire fence before the key read.
-                oldState = Interlocked.Read(ref oldEntry.state);
+                oldState = Volatile.Read(ref oldEntry.state);
             }
             else
             {
@@ -950,7 +954,7 @@ namespace Alc.NonBlocking
             bool copiedIntoNew = newTable.PutSlotCopy(key, valueState, hash);
 
             // Now hide the old value with TOMBPRIME to stop other threads re-copying.
-            if (Interlocked.Read(ref oldEntry.state) != TAG_TOMBPRIME)
+            if (Volatile.Read(ref oldEntry.state) != TAG_TOMBPRIME)
             {
                 Interlocked.Exchange(ref oldEntry.state, TAG_TOMBPRIME);
             }
@@ -1098,7 +1102,7 @@ namespace Alc.NonBlocking
                     }
 
                     ref var e = ref entries[i];
-                    if (Interlocked.Read(ref e.state) == TAG_TOMBSTONE)
+                    if (Volatile.Read(ref e.state) == TAG_TOMBSTONE)
                     {
                         if (Interlocked.CompareExchange(ref e.state, TAG_TOMBPRIME, TAG_TOMBSTONE) == TAG_TOMBSTONE)
                         {
@@ -1145,7 +1149,7 @@ namespace Alc.NonBlocking
             {
                 ref var nextEntry = ref entries[idx++];
 
-                if (!IsEmpty(Interlocked.Read(ref nextEntry.state)))
+                if (!IsEmpty(Volatile.Read(ref nextEntry.state)))
                 {
                     var nextKstore = nextEntry.key;
                     if (nextKstore == null)

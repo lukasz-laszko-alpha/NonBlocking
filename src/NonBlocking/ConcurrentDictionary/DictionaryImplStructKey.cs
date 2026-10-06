@@ -13,7 +13,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -112,16 +111,12 @@ namespace Alc.NonBlocking
             this._size = new Counter32();
             this._topDict = topDict;
 
-#if NETSTANDARD2_1_OR_GREATER || NET
-            if (RuntimeHelpers.IsReferenceOrContainsReferences<TKey>())
-#else
-            if (!typeof(TKey).IsValueType)
-#endif
-            {
-                // do not create a real sweeper just yet. Often it is not needed.
-                topDict._sweeperInstance = NULLVALUE;
-            }
-
+            // The tombstone sweeper is deliberately NOT armed for inline struct keys, even when
+            // TKey contains references. The sweeper re-keys swept slots (entry.key = default),
+            // which would violate the write-once commit protocol (InlineStructKey): committed key
+            // bits must never change, or concurrent comparer reads tear and enumeration can
+            // observe phantom default(TKey) entries. Removed entries (and the references their
+            // keys hold) are reclaimed when the table resizes, exactly like blittable-key tables.
             _ = valueIsAtomic;
         }
 
@@ -1115,11 +1110,12 @@ namespace Alc.NonBlocking
 
             if (newTable == null)
             {
-                Debug.Assert(!typeof(TKey).GetTypeInfo().IsValueType);
-                // help with sweeping in case the sweeper thread is stuck. We do not want to come here again.
-                // we write unconditionally though, since this is a relatively rare case.
+                // Unreachable: TOMBPRIME appears only during a resize copy (the sweeper is never
+                // armed for inline struct keys; see the constructor). Kept as a defensive escape:
+                // dead-mark the hash so probes skip the slot, but NEVER touch the key bits - the
+                // write-once protocol (InlineStructKey) requires a committed key to stay immutable.
+                Debug.Fail("TOMBPRIME observed without a new table; inline struct keys are never swept.");
                 entry.hash = SPECIAL_HASH_BITS;
-                entry.key = default(TKey);
 
                 return this;
             }

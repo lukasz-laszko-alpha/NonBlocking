@@ -26,7 +26,10 @@
 // Delete/prime are single CAS on ctrl (no value write, no lock needed); priming freezes the
 // value (writers then divert to the new table), so the resize copy reads it safely.
 //
-// All ctrl access uses Interlocked (Read/CompareExchange/Exchange) for 32-bit atomicity.
+// All ctrl access uses Volatile.Read(ref long) (atomic on 32-bit: the BCL falls back to
+// Interlocked.CompareExchange there; a plain acquire load on 64-bit) or Interlocked
+// (CompareExchange/Exchange) - never a plain or C#-volatile read. The version re-check
+// after a payload read additionally requires a full fence; see TryReadValue.
 
 #nullable disable
 
@@ -155,11 +158,22 @@ namespace Alc.NonBlocking
 
         // Reads `entry.value` consistently against the observed unlocked control word `c`.
         // Returns false if a concurrent writer changed the slot during the read (caller retries).
+        //
+        // MEMORY ORDERING (do not weaken):
+        //  - the version-BEFORE read (the `c` the caller passes in) only needs an acquire load;
+        //    Volatile.Read(ref long) is atomic even on 32-bit (the BCL implements it via
+        //    Interlocked.CompareExchange there) and on 64-bit it is a plain acquire load, so hot
+        //    readers do not take exclusive ownership of the slot's cache line.
+        //  - the version-AFTER re-check below REQUIRES a full fence between the payload read and
+        //    the re-read of `ctrl` (load-load: an acquire on the re-read alone does NOT order the
+        //    preceding payload loads before it on ARM64). Thread.MemoryBarrier fences on a
+        //    thread-private location, so concurrent readers still share the slot's cache line.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool TryReadValue(ref Entry entry, long c, out TValue value)
         {
             value = entry.value;
-            return Interlocked.Read(ref entry.ctrl) == c;
+            Thread.MemoryBarrier();
+            return Volatile.Read(ref entry.ctrl) == c;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -183,7 +197,7 @@ namespace Alc.NonBlocking
                     var sw = new SpinWait();
                     while (true)
                     {
-                        long c = Interlocked.Read(ref entry.ctrl);
+                        long c = Volatile.Read(ref entry.ctrl);
                         if (StateNullOrDead(c))
                         {
                             value = default(TValue);
@@ -287,7 +301,7 @@ namespace Alc.NonBlocking
                 entry = ref curTable._entries[idx];
             }
 
-            long c = Interlocked.Read(ref entry.ctrl);
+            long c = Volatile.Read(ref entry.ctrl);
             var newTable = curTable._newTable;
 
             if (newTable != null || IsTombPrime(c))
@@ -310,7 +324,7 @@ namespace Alc.NonBlocking
                 if (IsLocked(c))
                 {
                     sw.SpinOnce();
-                    c = Interlocked.Read(ref entry.ctrl);
+                    c = Volatile.Read(ref entry.ctrl);
                     continue;
                 }
 
@@ -327,7 +341,7 @@ namespace Alc.NonBlocking
                 {
                     if (!TryReadValue(ref entry, c, out removed))
                     {
-                        c = Interlocked.Read(ref entry.ctrl);
+                        c = Volatile.Read(ref entry.ctrl);
                         continue;
                     }
 
@@ -354,7 +368,7 @@ namespace Alc.NonBlocking
                     return true;
                 }
 
-                c = Interlocked.Read(ref entry.ctrl);
+                c = Volatile.Read(ref entry.ctrl);
             }
 
         FAILED:
@@ -418,7 +432,7 @@ namespace Alc.NonBlocking
                 entry = ref curTable._entries[idx];
             }
 
-            long c = Interlocked.Read(ref entry.ctrl);
+            long c = Volatile.Read(ref entry.ctrl);
             var newTable = curTable._newTable;
 
             if (newTable == null && IsEmpty(c) && curTable.TableIsCrowded())
@@ -447,7 +461,7 @@ namespace Alc.NonBlocking
                 if (IsLocked(c))
                 {
                     sw.SpinOnce();
-                    c = Interlocked.Read(ref entry.ctrl);
+                    c = Volatile.Read(ref entry.ctrl);
                     continue;
                 }
 
@@ -467,31 +481,40 @@ namespace Alc.NonBlocking
                         goto FAILED;
                     }
 
-                    c = Interlocked.Read(ref entry.ctrl);
+                    c = Volatile.Read(ref entry.ctrl);
                     continue;
+                }
+
+                // pre-lock: compare on a consistent read (dead was handled above, so the slot is
+                // live). The lock CAS below is keyed on the same observed `c`, so CAS success
+                // proves the value has not changed since this compare - no user code (the value
+                // comparer) ever runs while the per-slot lock is held. A throwing comparer would
+                // otherwise leave `ctrl` odd forever, hanging every reader/writer of the slot.
+                // This is the same pattern RemoveIfMatch uses.
+                if (match == ValueMatch.OldValue)
+                {
+                    if (!TryReadValue(ref entry, c, out var currentVal))
+                    {
+                        c = Volatile.Read(ref entry.ctrl);
+                        continue;
+                    }
+
+                    if (!EqualityComparer<TValue>.Default.Equals(oldVal, currentVal))
+                    {
+                        oldVal = currentVal;
+                        goto FAILED;
+                    }
                 }
 
                 // acquire the per-slot write lock (c is unlocked here)
                 long locked = c | 1L;
                 if (Interlocked.CompareExchange(ref entry.ctrl, locked, c) != c)
                 {
-                    c = Interlocked.Read(ref entry.ctrl);
+                    c = Volatile.Read(ref entry.ctrl);
                     continue;
                 }
 
                 // === we own the slot ===
-                if (match == ValueMatch.OldValue)
-                {
-                    // dead was handled pre-lock, so the slot is live; compare under the lock.
-                    if (!EqualityComparer<TValue>.Default.Equals(oldVal, entry.value))
-                    {
-                        oldVal = entry.value;
-                        // release unchanged: same tag, seq += 2
-                        Interlocked.Exchange(ref entry.ctrl, (c & TAG_MASK) | ((c + 2) & SEQ_MASK));
-                        goto FAILED;
-                    }
-                }
-
                 entry.value = newVal;
                 Interlocked.Exchange(ref entry.ctrl, TAG_VALUE | ((c + 2) & SEQ_MASK));
                 if (dead)
@@ -561,7 +584,7 @@ namespace Alc.NonBlocking
                 entry = ref curTable._entries[idx];
             }
 
-            long c = Interlocked.Read(ref entry.ctrl);
+            long c = Volatile.Read(ref entry.ctrl);
             var newTable = curTable._newTable;
 
             if (newTable == null && IsEmpty(c) && curTable.TableIsCrowded())
@@ -590,7 +613,7 @@ namespace Alc.NonBlocking
                 if (IsLocked(c))
                 {
                     sw.SpinOnce();
-                    c = Interlocked.Read(ref entry.ctrl);
+                    c = Volatile.Read(ref entry.ctrl);
                     continue;
                 }
 
@@ -602,7 +625,7 @@ namespace Alc.NonBlocking
                         return existing;
                     }
 
-                    c = Interlocked.Read(ref entry.ctrl);
+                    c = Volatile.Read(ref entry.ctrl);
                     continue;
                 }
 
@@ -615,7 +638,7 @@ namespace Alc.NonBlocking
                 long locked = c | 1L;
                 if (Interlocked.CompareExchange(ref entry.ctrl, locked, c) != c)
                 {
-                    c = Interlocked.Read(ref entry.ctrl);
+                    c = Volatile.Read(ref entry.ctrl);
                     continue;
                 }
 
@@ -675,7 +698,7 @@ namespace Alc.NonBlocking
                 entry = ref curTable._entries[idx];
             }
 
-            long c = Interlocked.Read(ref entry.ctrl);
+            long c = Volatile.Read(ref entry.ctrl);
             var newTable = curTable._newTable;
 
             if (newTable == null && IsEmpty(c) && curTable.TableIsCrowded())
@@ -704,7 +727,7 @@ namespace Alc.NonBlocking
                 if (IsLocked(c))
                 {
                     sw.SpinOnce();
-                    c = Interlocked.Read(ref entry.ctrl);
+                    c = Volatile.Read(ref entry.ctrl);
                     continue;
                 }
 
@@ -717,7 +740,7 @@ namespace Alc.NonBlocking
 
                 if (Interlocked.CompareExchange(ref entry.ctrl, 1L /* 0 | lock */, 0L) != 0L)
                 {
-                    c = Interlocked.Read(ref entry.ctrl);
+                    c = Volatile.Read(ref entry.ctrl);
                     continue;
                 }
 
@@ -865,7 +888,7 @@ namespace Alc.NonBlocking
         {
             var newTable = this._newTable;
 
-            Debug.Assert(IsPrime(Interlocked.Read(ref entry.ctrl)) || newTable != null);
+            Debug.Assert(IsPrime(Volatile.Read(ref entry.ctrl)) || newTable != null);
 
             if (newTable == null)
             {
@@ -912,7 +935,7 @@ namespace Alc.NonBlocking
                 return false;
             }
 
-            long c = Interlocked.Read(ref oldEntry.ctrl);
+            long c = Volatile.Read(ref oldEntry.ctrl);
             var sw = new SpinWait();
 
             if (!IsPrime(c))
@@ -924,7 +947,7 @@ namespace Alc.NonBlocking
                     if (IsLocked(c))
                     {
                         sw.SpinOnce();
-                        c = Interlocked.Read(ref oldEntry.ctrl);
+                        c = Volatile.Read(ref oldEntry.ctrl);
                         continue;
                     }
 
@@ -964,7 +987,7 @@ namespace Alc.NonBlocking
             var key = oldEntry.key;
             bool copiedIntoNew = newTable.PutSlotCopy(key, v, hash);
 
-            if (!IsTombPrime(Interlocked.Read(ref oldEntry.ctrl)))
+            if (!IsTombPrime(Volatile.Read(ref oldEntry.ctrl)))
             {
                 Interlocked.Exchange(ref oldEntry.ctrl, TAG_TOMBPRIME | (c & SEQ_MASK));
             }
@@ -1105,7 +1128,7 @@ namespace Alc.NonBlocking
                     }
 
                     ref var e = ref entries[i];
-                    long c = Interlocked.Read(ref e.ctrl);
+                    long c = Volatile.Read(ref e.ctrl);
                     if (!IsLocked(c) && (c & TAG_MASK) == TAG_TOMBSTONE)
                     {
                         if (Interlocked.CompareExchange(ref e.ctrl, TAG_TOMBPRIME | (c & SEQ_MASK), c) == c)
@@ -1153,7 +1176,7 @@ namespace Alc.NonBlocking
             {
                 ref var nextEntry = ref entries[idx++];
 
-                if (!IsEmpty(Interlocked.Read(ref nextEntry.ctrl)))
+                if (!IsEmpty(Volatile.Read(ref nextEntry.ctrl)))
                 {
                     var nextKstore = nextEntry.key;
                     if (nextKstore == null)
